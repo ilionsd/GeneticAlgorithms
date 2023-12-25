@@ -1,12 +1,12 @@
 #include <iostream>
 #include <random>
 
-#include "space.h"
-#include "ga/cmn-ga.h"
+#include "genetic_algorithm/space.h"
+#include "genetic_algorithm/cmn-ga.h"
 
 auto main() -> int {
     std::random_device rd;
-    auto params = ::ga::cmn_parameters {};
+    auto params = ::genetic_algorithm::cmn_parameters {};
     auto cmnGA = params.make_optimizer<std::mt19937>(rd, std::cout);
 
     auto resolution = std::vector<std::uint32_t>{ 1000, 1000 };
@@ -14,7 +14,7 @@ auto main() -> int {
         {-1, 1},
         {-1, 1}
     };
-    auto space = ::ga::make_space(bounds, resolution);
+    auto space = ::genetic_algorithm::make_space(bounds, resolution);
     auto fitness = std::function<double(const std::valarray<double>&)> (
         [](const std::valarray<double>& val) {
             return 0.0;

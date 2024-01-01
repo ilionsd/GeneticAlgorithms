@@ -5,6 +5,9 @@
 #include "genetic_algorithm/space.h"
 #include "genetic_algorithm/cmn-ga.h"
 
+template<typename CharT, typename T>
+std::basic_ostream<CharT>& operator<<(std::basic_ostream<CharT>& os, const std::valarray<T>& val);
+
 auto main() -> int {
 
     auto f1 = [](const std::valarray<double>& x) -> double {
@@ -18,7 +21,9 @@ auto main() -> int {
     std::array<std::valarray<int>, 25> A;
     for (std::size_t i = 0; i < 5; ++i) {
         for (std::size_t j = 0; j < 5; ++j) {
-            A[i * 5 + j] = std::move(std::valarray<int>(i - 2, j - 2) * 16);
+            auto x = static_cast<int>(i) - 2;
+            auto y = static_cast<int>(j) - 2;
+            A[i * 5 + j] = std::move(std::valarray<int>({x, y}) * 16);
         }
     }
     auto f3 = [A](const std::valarray<double>& x) -> double {
@@ -52,9 +57,8 @@ auto main() -> int {
         return val;
     };
 
-    std::random_device rd;
     auto params = ::genetic_algorithm::cmn_parameters {};
-    auto cmnGA = params.make_optimizer<std::mt19937>(rd);
+    auto cmnGA = params.make_optimizer();
 
     auto resolution = std::vector<std::uint32_t>{ 1000, 1000 };
     auto bounds = std::vector<std::pair<const double, const double>>{
@@ -68,7 +72,7 @@ auto main() -> int {
         }
     );
 
-    auto onNextGeneration = [](std::size_t gen, std::size_t size, const std::vector<std::valarray<double>>& population, const std::vector<double>& fitness) {
+    auto onNextGeneration = [](std::uint64_t gen, std::size_t size, const std::vector<std::valarray<double>>& population, const std::vector<double>& fitness) {
         if (gen % 10 == 0) {
             std::cout << "\nGeneration " << gen << ", population size " << size;
             for (std::size_t k = 0; k < size; ++k) {
@@ -78,7 +82,9 @@ auto main() -> int {
         }
     };
 
-    auto [real, vals] = cmnGA.optimize(space, fitness, onNextGeneration);
+    std::random_device rd;
+    std::mt19937_64 gen(rd());
+    auto [real, vals] = cmnGA.optimize(gen, space, fitness, onNextGeneration);
     std::cout << "\nFinal population size: " << real.size();
     for (std::size_t k = 0; k < real.size(); ++k) {
         std::cout << "\n" << real[k] << " -> " << vals[k];

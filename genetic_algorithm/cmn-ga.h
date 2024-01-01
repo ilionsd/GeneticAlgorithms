@@ -18,7 +18,13 @@
 
 namespace genetic_algorithm {
 
-template<class Generator>
+template<class InputIt, class Distance>
+inline auto advance(InputIt it, Distance n) {
+    auto tempIt = it;
+    std::advance(tempIt, n);
+    return tempIt;
+}
+
 class cmn_optimizer {
 public:
     cmn_optimizer(
@@ -29,8 +35,7 @@ public:
 	    const int nMin,
 	    const int nCrowd,
 	    const int nTry,
-	    const double targetClosestAvg,
-        std::random_device& rd) 
+	    const double targetClosestAvg)
     : mInitialPopulation(initialPopulation)
     , mMaxPopulation(maxPopulation)
     , mCrossoversPerGeneration(crossoversPerGeneration)
@@ -38,12 +43,12 @@ public:
     , mMin(nMin)
     , mCrowd(nCrowd)
     , mTry(nTry)
-    , mGenerator(rd)
+    , mTargetClosestAvg(targetClosestAvg)
     {}
     ~cmn_optimizer() = default;
 
-    template<typename T1, typename T2, class OnNextGeneration>
-    auto optimize(const space<T1, T2>& space, const std::function<T1(const std::valarray<T1>&)> fitness, OnNextGeneration onNextGeneration) {
+    template<class Gen, typename T1, typename T2, class OnNextGeneration>
+    auto optimize(Gen& generator, const space<T1, T2>& space, const std::function<T1(const std::valarray<T1>&)> fitness, OnNextGeneration onNextGeneration) const {
         // used to allocate memory
         const std::size_t increaseCapacity = (mInitialPopulation > mCrossoversPerGeneration + mMutationsPerGeneration) 
             ? mInitialPopulation
@@ -82,7 +87,7 @@ public:
         // stores individuals in mesh space
         std::vector<std::valarray<T2>> 
             populationMesh(populationCapacity),
-            increaseMesh = space.rand_n_mesh(mInitialPopulation, mGenerator);
+            increaseMesh = space.rand_n_mesh(generator, mInitialPopulation);
         std::vector<std::valarray<T1>>
             populationReal(populationCapacity),
             increaseReal(increaseCapacity);
@@ -105,11 +110,11 @@ public:
             increaseReal[k] = space(increaseMesh[k]);
         }
 
-        mGeneration = 0;
+        std::uint64_t generation = 0;
 
         while (increaseSize + populationSize < mMaxPopulation) {
             //-- Adding new individuals to population --
-            for (std::size_t k = 0; k < increase.size(); ++k) {
+            for (std::size_t k = 0; k < increaseSize; ++k) {
 
                 auto fitnessValue = fitness(increaseReal[k]);
                 if (fitnessValue < fitnessValueMin) {
@@ -121,12 +126,12 @@ public:
             increaseSize = 0;
 
             onNextGeneration(
-                const_cast<const std::size_t>(mGeneration), 
-                const_cast<const std::size_t>(populationSize),
+                const_cast<const std::uint64_t&>(generation),
+                const_cast<const std::size_t&>(populationSize),
                 const_cast<const std::vector<std::valarray<T1>>&>(populationReal),
                 const_cast<const std::vector<T1>&>(fitnessValues)
             );
-            ++mGeneration;
+            ++generation;
 
             //-- Finding local optima --
             {
@@ -141,17 +146,20 @@ public:
                 for (std::size_t j = 0; j < populationSize; ++j) {
                     temporaryDataCopy[j] = destructibleDataCopy[j] = euclidean_distance(populationReal[i], populationReal[j]);
                 }
+                auto nth = advance(destructibleDataCopy.begin(), mMin);
                 {
                     auto begin = destructibleDataCopy.begin();
                     auto end = destructibleDataCopy.end();
-                    std::nth_element(begin, std::advance(destructibleDataCopy.begin(), mMin), end);
+                    std::nth_element(begin, nth, end);
                 }
                 {
-                    auto locality = destructibleDataCopy[mMin];
+                    auto locality = *nth;
                     for (std::size_t j = 0; mask[i] && j < populationSize; ++j) {
                         auto isNonLocal = (i == j) || (temporaryDataCopy[j] > locality);
-                        mask[i] &&= !isNonLocal || (fitnessValues[i] > fitnessValues[j]);
-                        mask[j] &&= isNonLocal || (fitnessValues[i] < fitnessValues[j]);
+                        auto isOptimaI = !isNonLocal || (fitnessValues[i] > fitnessValues[j]);
+                        auto isOptimaJ = isNonLocal || (fitnessValues[i] < fitnessValues[j]);
+                        mask[i] = mask[i] && isOptimaI;
+                        mask[j] = mask[j] && isOptimaJ;
                     }
                 }
             }
@@ -183,12 +191,13 @@ public:
             //-- Calculating adjusted fitness --
             {
                 auto begin = proximityWeight.begin();
-                auto end = std::advance(proximityWeight.begin(), populationSize);
+                auto end = begin;
+                std::advance(end, populationSize);
                 std::fill(begin, end, static_cast<T1>(0.0));
             }
             {
                 auto begin = fitnessWeighted.begin();
-                auto end = std::advance(fitnessWeighted.begin(), populationSize);
+                auto end = advance(fitnessWeighted.begin(), populationSize);
                 std::fill(begin, end, static_cast<T1>(0.0));
             }
             for (std::size_t j = 0; j < populationSize; ++j) {
@@ -198,7 +207,7 @@ public:
                 {
                     // Calculating linear-scaled fitness per optima
                     auto begin = fitnessValues.cbegin();
-                    auto end = std::advance(fitnessValues.cbegin(), populationSize);
+                    auto end = advance(fitnessValues.cbegin(), populationSize);
                     auto fitnessOptimusDiff = fitnessValues[j] - fitnessValueMin;
                     std::transform(begin, end, fitnessScaled.begin(), [fitnessValueMin, fitnessOptimusDiff] (const auto f) {
                         return (f - fitnessValueMin) / fitnessOptimusDiff;
@@ -207,20 +216,21 @@ public:
                 {
                     // Making a copy of linear-scaled fitness, because nth_element rearranges elements
                     auto begin = fitnessScaled.cbegin();
-                    auto end = std::advance(fitnessScaled.cbegin(), populationSize);
+                    auto end = advance(fitnessScaled.cbegin(), populationSize);
                     std::copy(begin, end, destructibleDataCopy.begin());
                 }
+                auto nth = advance(destructibleDataCopy.begin(), populationSize / 2);
                 {
                     // Finding median of linear-scaled fitness
                     auto begin = destructibleDataCopy.begin();
-                    auto end = std::advance(destructibleDataCopy.begin(), populationSize);
-                    std::nth_element(begin, std::advance(begin, populationSize / 2), end);
+                    auto end = advance(destructibleDataCopy.begin(), populationSize);
+                    std::nth_element(begin, nth, end);
                 }
                 {
                     // Calculating exponentially-scaled fitness per optima
                     auto power =  std::log(0.5) / std::log(destructibleDataCopy[populationSize / 2]);
                     auto begin = fitnessScaled.cbegin();
-                    auto end = std::advance(fitnessScaled.cbegin(), populationSize);
+                    auto end = advance(fitnessScaled.cbegin(), populationSize);
                     std::transform(begin, end, fitnessScaled.begin(), [power] (const auto f) {
                         return std::pow(f, power);
                     });
@@ -235,7 +245,7 @@ public:
             {
                 // Normalizing overall scaled fitness by proximity
                 auto begin = proximityWeight.cbegin();
-                auto end = std::advance(proximityWeight.cbegin(), populationSize);
+                auto end = advance(proximityWeight.cbegin(), populationSize);
                 std::transform(begin, end, fitnessWeighted.cbegin(), fitnessWeighted.begin(), [](const auto p, const auto pf) {
                     auto wf = pf / p;
                     return std::isnan(wf) ? static_cast<T1>(1.0) : wf;
@@ -246,12 +256,12 @@ public:
             double accumulator = 0.0;
             {
                 auto begin = fitnessWeighted.cbegin();
-                auto end = std::advance(fitnessWeighted.cbegin(), populationSize);
+                auto end = advance(fitnessWeighted.cbegin(), populationSize);
                 accumulator = std::accumulate(begin, end, accumulator);
             }
             {
                 auto begin = fitnessWeighted.cbegin();
-                auto end = std::advance(fitnessWeighted.cbegin(), populationSize);
+                auto end = advance(fitnessWeighted.cbegin(), populationSize);
                 std::transform(begin, end, probability.begin(), [accumulator](const auto w) {
                     return w / accumulator;
                 });
@@ -259,10 +269,10 @@ public:
             {
                 // Fitness-Proportionate selection (FPS) for P1
                 auto begin = probability.cbegin();
-                auto end = std::advance(probability.cbegin(), populationSize);
+                auto end = advance(probability.cbegin(), populationSize);
                 auto p1 = std::discrete_distribution<std::size_t>(begin, end);
                 for (std::size_t k = 0; k < mCrossoversPerGeneration; ++k) {
-                    crossover[k].first = p1(mGenerator);
+                    crossover[k].first = p1(generator);
                 }
             }
             for (std::size_t k = 0; k < mCrossoversPerGeneration; ++k) {
@@ -273,11 +283,11 @@ public:
                         : 1.0 / euclidean_distance(populationReal[crossover[k].first], populationReal[i]);
                 }
                 auto begin = probability.cbegin();
-                auto end = std::advance(probability.cbegin(), populationSize);
+                auto end = advance(probability.cbegin(), populationSize);
                 auto p2 = std::discrete_distribution<std::size_t>(begin, end);
                 auto fitnessMax = std::numeric_limits<T1>::min();
                 for (std::size_t crowd = 0; crowd < mCrowd; ++crowd) {
-                    auto candidate = p2(mGenerator);
+                    auto candidate = p2(generator);
                     if (fitnessMax < fitnessWeighted[candidate]) {
                         std::tie(crossover[k].second, fitnessMax) = std::tie(candidate, fitnessWeighted[candidate]);
                     }
@@ -286,7 +296,7 @@ public:
             {
                 // Flags for crossover pairs used
                 auto begin = mask.begin();
-                auto end = std::advance(mask.begin(), mCrossoversPerGeneration);
+                auto end = advance(mask.begin(), mCrossoversPerGeneration);
                 std::fill(begin, end, false);
                 // Crossover
                 std::size_t remainingTries = mTry;
@@ -296,9 +306,10 @@ public:
                     if (!mask[pair]) {
                         --remainingTries;
                         auto [p1, p2] = crossover[pair];
-                        auto offspringMesh = offspring_by_crossover(populationMesh[p1], populationMesh[p2]);
-                        auto offspringReal = space(offspringMesh);
+                        auto offspringMesh = offspring_by_crossover(generator, populationMesh[p1], populationMesh[p2]);
+                        auto offspringReal = space.to_real(offspringMesh);
                         std::size_t closestIndex = 0;
+                        auto minDistance = std::numeric_limits<T1>::max();
                         for (std::size_t i = 1; i < populationSize; ++i) {
                             auto distance = euclidean_distance(offspringReal, populationReal[i]);
                             if (minDistance > distance) {
@@ -316,11 +327,12 @@ public:
                 auto d = std::uniform_int_distribution<std::size_t>(0, populationSize);
                 while (remainingTries > 0 && increaseSize < mCrossoversPerGeneration + mMutationsPerGeneration) {
                     --remainingTries;
-                    auto k = d(mGenerator);
-                    auto offspringMesh = offspring_by_mutation(populationMesh[k]);
+                    auto k = d(generator);
+                    auto offspringMesh = offspring_by_mutation(generator, populationMesh[k]);
                     if (space.contains(offspringMesh)) {
-                        auto offspringReal = space(offspringMesh);
+                        auto offspringReal = space.to_real(offspringMesh);
                         std::size_t closestIndex = 0;
+                        auto minDistance = std::numeric_limits<T1>::max();
                         for (std::size_t i = 1; i < populationSize; ++i) {
                             auto distance = euclidean_distance(offspringReal, populationReal[i]);
                             if (minDistance > distance) {
@@ -349,8 +361,8 @@ protected:
         return 0.08 * (1.001 - factorG * fitness);
     }
 
-    template<typename T>
-    auto offspring_by_crossover(const std::valarray<T>& p1, const std::valarray<T>& p2) const {
+    template<class Gen, typename T>
+    auto offspring_by_crossover(Gen& generator, const std::valarray<T>& p1, const std::valarray<T>& p2) const -> std::valarray<T> {
         auto dimensions = std::min(p1.size(), p2.size());
         auto offspring = std::valarray<T>(dimensions);
         for (std::size_t dim = 0; dim < dimensions; ++dim) {
@@ -360,20 +372,20 @@ protected:
             else {
                 auto [min, max] = std::minmax(p1[dim], p2[dim]);
                 auto d = std::uniform_int_distribution<T>(min, max);
-                offspring[dim] = d(mGenerator);
+                offspring[dim] = d(generator);
             }
         }
         return offspring;
     }
 
-    template<typename T>
-    auto offspring_by_mutation(const std::valarray<T>& p1) const {
+    template<class Gen, typename T>
+    auto offspring_by_mutation(Gen& generator, const std::valarray<T>& p1) const -> std::valarray<T> {
         auto dimensions = p1.size();
         auto stddev = 0.33 * dimensions;
         auto offspring = std::valarray<T>(dimensions);
         for (std::size_t dim = 0; dim < dimensions; ++dim) {
             auto d = std::normal_distribution<double>(p1[dim], stddev);
-            offspring[dim] = static_cast<T>(std::round(d(mGenerator)));
+            offspring[dim] = static_cast<T>(std::round(d(generator)));
         }
         return offspring;
     }
@@ -388,21 +400,18 @@ private:
 	const int mTry;
 	const double mTargetClosestAvg;
 
-    Generator mGenerator;
     std::uint64_t mGeneration;
 };
 
 struct cmn_parameters {
-    template<class Generator>
-    auto make_optimizer(std::random_device& randomDevice) const {
-        return cmn_optimizer<Generator>(
+    auto make_optimizer() const {
+        return cmn_optimizer(
             initialPopulation,
             maxPopulation,
             crossoversPerGeneration,
             mutationsPerGeneration,
             nMin, nCrowd, nTry,
-            targetClosestAvg,
-            randomDevice
+            targetClosestAvg
         );
     }
 

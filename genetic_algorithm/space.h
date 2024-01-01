@@ -20,6 +20,7 @@ public:
     , mLeft(dimensions)
     , mStep(dimensions)
     , mSize(dimensions)
+    , mTemp(dimensions)
     {}
     ~space() = default;
 
@@ -62,21 +63,30 @@ public:
     }
 
     inline
-    auto to_mesh(const std::valarray<real_type>& real) const {
+    auto to_mesh(const std::valarray<real_type>& real) const -> std::valarray<mesh_type> {
         //assert (!(mLeft > real).max() && !(mLeft + mRange < real).max())
-        return (real - mLeft) / mStep;
+        mTemp = (real - mLeft) / mStep;
+        auto mesh = std::valarray<mesh_type>(dimensions);
+        std::transform(std::begin(mTemp), std::end(mTemp), std::begin(mesh), [](auto val) {
+            return static_cast<mesh_type>(std::round(val));
+        });
+        return mesh;
     }
     inline
-    auto to_real(const std::valarray<mesh_type>& mesh) const {
+    auto to_real(const std::valarray<mesh_type>& mesh) const -> std::valarray<real_type> {
         //assert (!(0 > mesh).max() && !(mSize < mesh).max())
-        return mesh * mStep + mLeft;
+        std::transform(std::begin(mesh), std::end(mesh), std::begin(mTemp), [](auto val) {
+            return static_cast<real_type>(val);
+        });
+
+        return std::valarray<real_type>(mTemp * mStep + mLeft);
     }
 
     template<class G>
     auto rand_real(G& generator) const {
         std::valarray<real_type> result(dimensions);
         auto right = mLeft + mStep * (mSize - 1);
-        for (std::size_t dim = 0; dim < dimensionsl ++dim) {
+        for (std::size_t dim = 0; dim < dimensions; ++dim) {
             std::uniform_real_distribution<real_type> dist(mLeft[dim], right[dim]);
             result[dim] = dist(generator);
         }
@@ -85,7 +95,7 @@ public:
     template<class G>
     auto rand_mesh(G& generator) const {
         std::valarray<mesh_type> result(dimensions);
-        for (std::size_t dim = 0; dim < dimensionsl ++dim) {
+        for (std::size_t dim = 0; dim < dimensions; ++dim) {
             std::uniform_int_distribution<mesh_type> dist(0, mSize[dim]);
             result[dim] = dist(generator);
         }
@@ -93,10 +103,10 @@ public:
     }
 
     template<class G>
-    auto rand_n_real(const std::size_t n, G& generator) const {
+    auto rand_n_real(G& generator, const std::size_t n) const {
         std::vector<std::valarray<real_type>> results(n, std::valarray<real_type>(dimensions));
         auto right = mLeft + mStep * (mSize - 1);
-        for (std::size_t dim = 0; dim < dimensionsl ++dim) {
+        for (std::size_t dim = 0; dim < dimensions; ++dim) {
             std::uniform_real_distribution<real_type> dist(mLeft[dim], right[dim]);
             for (std::size_t k = 0; k < n; ++k) {
                 results[k][dim] = dist(generator);
@@ -105,9 +115,9 @@ public:
         return results;
     }
     template<class G>
-    auto rand_n_mesh(const std::size_t n, G& generator) const {
+    auto rand_n_mesh(G& generator, const std::size_t n) const {
         std::vector<std::valarray<mesh_type>> results(n, std::valarray<mesh_type>(dimensions));
-        for (std::size_t dim = 0; dim < dimensionsl ++dim) {
+        for (std::size_t dim = 0; dim < dimensions; ++dim) {
             std::uniform_int_distribution<mesh_type> dist(0, mSize[dim]);
             for (std::size_t k = 0; k < n; ++k) {
                 results[k][dim] = dist(generator);
@@ -115,12 +125,14 @@ public:
         }
         return results;
     }
+    
+    const std::size_t dimensions;
 
 private:
-    const std::size_t dimensions;
     std::valarray<real_type> mLeft;
     std::valarray<real_type> mStep;
     std::valarray<mesh_type> mSize;
+    mutable std::valarray<real_type> mTemp;
 };
 
 template<typename T1, typename T2>
@@ -132,8 +144,8 @@ auto make_space(
     for (std::size_t k = 0; k < space.dimensions; ++k) {
         auto left = bounds[k].first;
         auto range = bounds[k].second - bounds[k].first;
-        auto size = static_cast<T2>(std::ceil(range / precision[k])) + 1;
-        space[k] = std::tie(left, range / (size - 1), size)
+        auto step = static_cast<T1>(range / (resolution[k] - 1));
+        space[k] = std::tie(left, step, resolution[k]);
     }
     return space;
 }

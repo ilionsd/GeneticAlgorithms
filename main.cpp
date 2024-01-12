@@ -58,18 +58,24 @@ auto main() -> int {
     };
 
     auto params = ::genetic_algorithm::cmn_parameters {};
+    params.initialPopulation = 100;
+    params.maxPopulation = 1000;
+    params.crossoversPerGeneration = 11;
+    params.mutationsPerGeneration = 7;
+    params.nMin = 10;
+    params.nCrowd = 20;
+    params.nTry = 20;
+    params.targetClosestAvg = 2;
     auto cmnGA = params.make_optimizer();
 
-    auto resolution = std::vector<std::uint32_t>{ 1000, 1000 };
+    auto resolution = std::vector<std::uint32_t>{ 10000, 10000 };
     auto bounds = std::vector<std::pair<const double, const double>>{
-        {-1, 1},
-        {-1, 1}
+        {-100, 100},
+        {-100, 100}
     };
     auto space = ::genetic_algorithm::make_space(bounds, resolution);
     auto fitness = std::function<double(const std::valarray<double>&)> (
-        [](const std::valarray<double>& val) {
-            return 0.0;
-        }
+        f4
     );
 
     auto onNextGeneration = [](std::uint64_t gen, std::size_t size, const std::vector<std::valarray<double>>& population, const std::vector<double>& fitness) {
@@ -85,6 +91,7 @@ auto main() -> int {
     std::random_device rd;
     std::mt19937_64 gen(rd());
     auto [real, vals] = cmnGA.optimize(gen, space, fitness, onNextGeneration);
+    
     std::cout << "\nFinal population size: " << real.size();
     for (std::size_t k = 0; k < real.size(); ++k) {
         std::cout << "\n" << real[k] << " -> " << vals[k];

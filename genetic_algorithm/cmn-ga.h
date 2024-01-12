@@ -136,7 +136,7 @@ public:
             //-- Finding local optima --
             {
                 auto begin = mask.begin();
-                auto end = mask.end();
+                auto end = advance(mask.begin(), populationSize);
                 std::fill(begin, end, true);
             }
             for (std::size_t i = 0; i < populationSize; ++i) {
@@ -144,30 +144,31 @@ public:
                     continue;
                 }
                 for (std::size_t j = 0; j < populationSize; ++j) {
-                    temporaryDataCopy[j] = destructibleDataCopy[j] = euclidean_distance(populationReal[i], populationReal[j]);
+                    auto distance = euclidean_distance(populationReal[i], populationReal[j]);
+                    temporaryDataCopy[j] = destructibleDataCopy[j] = distance;
                 }
                 auto nth = advance(destructibleDataCopy.begin(), mMin);
                 {
                     auto begin = destructibleDataCopy.begin();
-                    auto end = destructibleDataCopy.end();
+                    auto end = advance(destructibleDataCopy.begin(), populationSize);
                     std::nth_element(begin, nth, end);
                 }
                 {
                     auto locality = *nth;
                     for (std::size_t j = 0; mask[i] && j < populationSize; ++j) {
                         auto isNonLocal = (i == j) || (temporaryDataCopy[j] > locality);
-                        auto isOptimaI = !isNonLocal || (fitnessValues[i] > fitnessValues[j]);
-                        auto isOptimaJ = isNonLocal || (fitnessValues[i] < fitnessValues[j]);
-                        mask[i] = mask[i] && isOptimaI;
-                        mask[j] = mask[j] && isOptimaJ;
+                        auto maybeOptimumI = isNonLocal || (fitnessValues[i] > fitnessValues[j]);
+                        auto maybeOptimumJ = isNonLocal || (fitnessValues[i] < fitnessValues[j]);
+                        mask[i] = mask[i] && maybeOptimumI;
+                        mask[j] = mask[j] && maybeOptimumJ;
                     }
                 }
             }
 
             //-- Stopping criteria --
             auto closestAvg = 0.0;
+            std::size_t localOptimaNumber = 0;
             {
-                std::size_t localOptimaNumber = 0;
                 auto accumulator = 0.0;
                 for (std::size_t i = 0; i < populationSize; ++i) {
                     if (mask[i]) {
@@ -410,7 +411,10 @@ struct cmn_parameters {
             maxPopulation,
             crossoversPerGeneration,
             mutationsPerGeneration,
-            nMin, nCrowd, nTry,
+            nMin, nCrowd,
+            nTry > crossoversPerGeneration + mutationsPerGeneration
+                ? nTry
+                : crossoversPerGeneration + mutationsPerGeneration,
             targetClosestAvg
         );
     }

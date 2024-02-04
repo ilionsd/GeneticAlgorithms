@@ -14,7 +14,8 @@
 #include <valarray>
 #include <vector>
 
-#include "space.h"
+#include "common/optimizer.h"
+#include "common/space.h"
 
 namespace genetic_algorithm {
 
@@ -25,7 +26,18 @@ inline auto advance(InputIt it, Distance n) {
     return tempIt;
 }
 
-class cmn_optimizer {
+enum class cmn_result: int {
+    // UNEXPECTED
+    UNABLE_TO_ADD_OFFSPRINGS = -2,
+    IN_PROGRESS = -1,
+    // SUCCESS
+    CONVERGED = 0,
+    REACHED_GENERATION_LIMIT = 1,
+    REACHED_POPULATION_LIMIT = 2,
+};
+
+template<class OnNextGeneration>
+class cmn_optimizer: public common::optimizer<cmn_optimizer<OnNextGeneration>> {
 public:
     cmn_optimizer(
         const std::size_t initialPopulation,
@@ -35,7 +47,9 @@ public:
 	    const int nMin,
 	    const int nCrowd,
 	    const int nTry,
-	    const double targetClosestAvg)
+        const std::size_t generationLimit,
+	    const double targetClosestAvg,
+        OnNextGeneration onNextGneration)
     : mInitialPopulation(initialPopulation)
     , mMaxPopulation(maxPopulation)
     , mCrossoversPerGeneration(crossoversPerGeneration)
@@ -43,12 +57,14 @@ public:
     , mMin(nMin)
     , mCrowd(nCrowd)
     , mTry(nTry)
+    , mGenerationLimit(generationLimit)
     , mTargetClosestAvg(targetClosestAvg)
+    , mOnNextGeneration(onNextGneration)
     {}
     ~cmn_optimizer() = default;
 
-    template<class Gen, typename T1, typename T2, class OnNextGeneration>
-    auto optimize(Gen& generator, const space<T1, T2>& space, const std::function<T1(const std::valarray<T1>&)> fitness, OnNextGeneration onNextGeneration) const {
+    template<class Gen, typename T1, typename T2>
+    auto optimize(Gen& generator, const common::space<T1, T2>& space, const std::function<T1(const std::valarray<T1>&)> fitness) const {
         // used to allocate memory
         const std::size_t increaseCapacity = (mInitialPopulation > mCrossoversPerGeneration + mMutationsPerGeneration) 
             ? mInitialPopulation
@@ -78,7 +94,7 @@ public:
         memoryUsage += sizeof(std::vector<std::pair<std::size_t, std::size_t>>) 
             + populationCapacity * sizeof(std::pair<std::size_t, std::size_t>);
 
-        const std::size_t memoryUsagePeak = memoryUsage;
+        const std::size_t memoryUsageTotal = memoryUsage;
 
         // tracks current population size
         std::size_t populationSize = 0;
@@ -110,9 +126,22 @@ public:
             increaseReal[k] = space(increaseMesh[k]);
         }
 
+        cmn_result result = cmn_result::IN_PROGRESS;
         std::uint64_t generation = 0;
+        int failedIncreaseCounter = 0;
 
-        while (increaseSize + populationSize < mMaxPopulation) {
+        while (true) {
+            if (increaseSize) {
+                failedIncreaseCounter = mFailedIncreaseCounterDefault;
+            }
+            else {
+                --failedIncreaseCounter;
+            }
+            if (!failedIncreaseCounter) {
+                result = cmn_result::UNABLE_TO_ADD_OFFSPRINGS;
+                break;
+            }
+            
             //-- Adding new individuals to population --
             for (std::size_t k = 0; k < increaseSize; ++k) {
 
@@ -124,8 +153,13 @@ public:
             }
             populationSize += increaseSize;
             increaseSize = 0;
+            
+            if (populationSize >= mMaxPopulation) {
+                result = cmn_result::REACHED_POPULATION_LIMIT;
+                break;
+            }
 
-            onNextGeneration(
+            mOnNextGeneration(
                 const_cast<const std::uint64_t&>(generation),
                 const_cast<const std::size_t&>(populationSize),
                 const_cast<const std::vector<std::valarray<T1>>&>(populationReal),
@@ -144,7 +178,7 @@ public:
                     continue;
                 }
                 for (std::size_t j = 0; j < populationSize; ++j) {
-                    auto distance = euclidean_distance(populationReal[i], populationReal[j]);
+                    auto distance = common::euclidean_distance(populationReal[i], populationReal[j]);
                     temporaryDataCopy[j] = destructibleDataCopy[j] = distance;
                 }
                 auto nth = advance(destructibleDataCopy.begin(), mMin);
@@ -175,7 +209,7 @@ public:
                         ++localOptimaNumber;
                         auto closest = std::numeric_limits<double>::max();
                         for (std::size_t j = 0; j < populationSize; ++j) {
-                            auto distance = euclidean_distance(populationMesh[i], populationMesh[j]);
+                            auto distance = common::euclidean_distance(populationMesh[i], populationMesh[j]);
                             if (i != j && closest > distance) {
                                 closest = distance;
                             }
@@ -186,6 +220,7 @@ public:
                 closestAvg = accumulator / localOptimaNumber;
             }
             if (closestAvg < mTargetClosestAvg) {
+                result = cmn_result::CONVERGED;
                 break;
             }
 
@@ -238,7 +273,7 @@ public:
                 }
                 // Combining scaled fitness per optima into a scaled fitness overall
                 for (std::size_t i = 0; i < populationSize; ++i) {
-                    auto proximity = static_cast<T1>(1.0) / euclidean_distance(populationReal[j], populationReal[i]);
+                    auto proximity = static_cast<T1>(1.0) / common::euclidean_distance(populationReal[j], populationReal[i]);
                     proximityWeight[i] += proximity;
                     fitnessWeighted[i] += proximity * fitnessScaled[i];
                 }
@@ -281,7 +316,7 @@ public:
                 for (std::size_t i = 0; i < populationSize; ++i) {
                     probability[i] = (i == crossover[k].first)
                         ? 0.0
-                        : 1.0 / euclidean_distance(populationReal[crossover[k].first], populationReal[i]);
+                        : 1.0 / common::euclidean_distance(populationReal[crossover[k].first], populationReal[i]);
                 }
                 auto begin = probability.cbegin();
                 auto end = advance(probability.cbegin(), populationSize);
@@ -312,12 +347,12 @@ public:
                         std::size_t closestIndex = 0;
                         auto minDistance = std::numeric_limits<T1>::max();
                         for (std::size_t i = 1; i < populationSize; ++i) {
-                            auto distance = euclidean_distance(offspringReal, populationReal[i]);
+                            auto distance = common::euclidean_distance(offspringReal, populationReal[i]);
                             if (minDistance > distance) {
                                 std::tie(minDistance, closestIndex) = std::tie(distance, i);
                             }
                         }
-                        if (minDistance > r_min(fitnessWeighted[closestIndex], mGeneration)) {
+                        if (minDistance > r_min(fitnessWeighted[closestIndex], generation)) {
                             std::tie(increaseMesh[increaseSize], increaseReal[increaseSize]) = std::move(std::tie(offspringMesh, offspringReal));
                             mask[pair] = true;
                             ++increaseSize;
@@ -335,12 +370,12 @@ public:
                         std::size_t closestIndex = 0;
                         auto minDistance = std::numeric_limits<T1>::max();
                         for (std::size_t i = 1; i < populationSize; ++i) {
-                            auto distance = euclidean_distance(offspringReal, populationReal[i]);
+                            auto distance = common::euclidean_distance(offspringReal, populationReal[i]);
                             if (minDistance > distance) {
                                 std::tie(minDistance, closestIndex) = std::tie(distance, i);
                             }
                         }
-                        if (minDistance > r_min(fitnessWeighted[closestIndex], mGeneration)) {
+                        if (minDistance > r_min(fitnessWeighted[closestIndex], generation)) {
                             std::tie(increaseMesh[increaseSize], increaseReal[increaseSize]) = std::move(std::tie(offspringMesh, offspringReal));
                             ++increaseSize;
                         }
@@ -351,7 +386,7 @@ public:
 
         populationReal.resize(populationSize);
         fitnessValues.resize(populationSize);
-        return std::make_tuple(populationReal, fitnessValues);
+        return std::make_tuple(result, generation, populationReal, fitnessValues);
     }
 
 protected:
@@ -399,14 +434,18 @@ private:
 	const int mMin;
 	const int mCrowd;
 	const int mTry;
+    const std::uint64_t mGenerationLimit;
 	const double mTargetClosestAvg;
 
-    std::uint64_t mGeneration;
+    const OnNextGeneration mOnNextGeneration;
+    
+    const int mFailedIncreaseCounterDefault = 5;
 };
 
 struct cmn_parameters {
-    auto make_optimizer() const {
-        return cmn_optimizer(
+    template<class OnNextGeneration>
+    auto make_optimizer(OnNextGeneration onNextGeneration) const {
+        return cmn_optimizer<OnNextGeneration>(
             initialPopulation,
             maxPopulation,
             crossoversPerGeneration,
@@ -415,7 +454,9 @@ struct cmn_parameters {
             nTry > crossoversPerGeneration + mutationsPerGeneration
                 ? nTry
                 : crossoversPerGeneration + mutationsPerGeneration,
-            targetClosestAvg
+            generationLimit,
+            targetClosestAvg,
+            onNextGeneration
         );
     }
 
@@ -427,6 +468,7 @@ struct cmn_parameters {
 	int nCrowd;
 	int nTry;
 	
+    std::uint64_t generationLimit;
 	double targetClosestAvg;
 };
 

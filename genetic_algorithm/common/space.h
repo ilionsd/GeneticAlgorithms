@@ -1,13 +1,14 @@
-#ifndef GENETIC_ALGORITHM__SPACE_H_
-#define GENETIC_ALGORITHM__SPACE_H_
+#ifndef GENETIC_ALGORITHM__COMMON__SPACE_H_
+#define GENETIC_ALGORITHM__COMMON__SPACE_H_
 
 #include <cstddef>
+#include <ostream>
 #include <tuple>
 #include <type_traits>
 #include <valarray>
 #include <vector>
 
-namespace genetic_algorithm {
+namespace genetic_algorithm::common {
 
 template<typename T1, typename T2>
 class space {
@@ -150,6 +151,11 @@ auto make_space(
     return space;
 }
 
+template<typename CharT, typename T1, typename T2>
+std::basic_ostream<CharT>& operator<<(std::basic_ostream<CharT>& os, const space<T1, T2> &space) {
+    return os;
+}
+
 template<typename T>
 inline auto euclidean_distance(const std::valarray<T>& a, const std::valarray<T>& b) {
     auto diff = a - b;
@@ -157,6 +163,6 @@ inline auto euclidean_distance(const std::valarray<T>& a, const std::valarray<T>
     return std::sqrt(underroot);
 }
 
-} // namespace genetic_algorithm
+} // namespace genetic_algorithm::common
 
-#endif // GENETIC_ALGORITHM__SPACE_H_
+#endif // GENETIC_ALGORITHM__COMMON__SPACE_H_

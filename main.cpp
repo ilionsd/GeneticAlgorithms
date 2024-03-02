@@ -1,46 +1,27 @@
 #include <array>
-#include <charconv>
 #include <iostream>
 #include <random>
 #include <optional>
+#include <variant>
+#include <unordered_set>
 #include <unordered_map>
 
 #include <boost/program_options.hpp>
 
+#include <json/json.h>
+
 #include "genetic_algorithm/common/space.h"
+#include "genetic_algorithm/dummy.h"
 #include "genetic_algorithm/cmn-ga.h"
 #include "f1.h"
 #include "f2.h"
 #include "f3.h"
 #include "f4.h"
+#include "utility.h"
 
 
 template<typename CharT, typename T>
 std::basic_ostream<CharT>& operator<<(std::basic_ostream<CharT>& os, const std::valarray<T>& val);
-
-template<typename T>
-auto select_target(int target) {
-    switch (target) {
-        case 1: {
-            auto [fitness, bounds] = f1<T>();
-            return std::make_pair(std::function<T(const std::valarray<T>&)>(fitness), bounds);
-        }
-        case 2: {
-            auto [fitness, bounds] = f2<T>();
-            return std::make_pair(std::function<T(const std::valarray<T>&)>(fitness), bounds);
-        }
-        case 3: {
-            auto [fitness, bounds] = f3<T>();
-            return std::make_pair(std::function<T(const std::valarray<T>&)>(fitness), bounds);
-        }
-        case 4: {
-            auto [fitness, bounds] = f4<T>();
-            return std::make_pair(std::function<T(const std::valarray<T>&)>(fitness), bounds);
-        }
-    default:
-        return std::make_pair(std::function<T(const std::valarray<T>&)>(), std::vector<std::pair<const T, const T>>());
-    }
-}
 
 template<typename CharT>
 auto parse_function(const std::basic_string<CharT> &str) {
@@ -52,19 +33,46 @@ auto parse_function(const std::basic_string<CharT> &str) {
     }
 }
 
-template<typename CharT>
-std::optional<int> maybe_int(const std::basic_string<CharT> &str) {
-    int val;
-    auto [ptr, ec] = std::from_chars(str.data(), str.data() + str.size(), val);
-    if (ec == std::errc{}) {
-        return std::make_optional<int>();
-    }
-    return std::make_optional<int>(val);
-}
+template<class... Ts>
+struct overloaded : Ts... { using Ts::operator()...; };
+template<class... Ts>
+overloaded(Ts...) -> overloaded<Ts...>;
+
+using target_type = double;
+using fitness_function = std::function<target_type(const std::valarray<target_type> &)>;
+using bounds_type = std::vector<std::pair<const target_type, const target_type>>;
+
+using variants_of_parameters = std::variant<::genetic_algorithm::dummy::parameters, ::genetic_algorithm::cmn::parameters>;
+
 
 auto main(int argc, char *argv[]) -> int {
 
+    std::unordered_map<int, std::pair<fitness_function, bounds_type>> availableTargets {
+        { 1, f1<target_type>() },
+        { 2, f2<target_type>() },
+        { 3, f3<target_type>() },
+        { 4, f4<target_type>() }
+    };
+    
+    std::unordered_map<std::string, variants_of_parameters> defaultParams {
+        { "dummy", ::genetic_algorithm::dummy::parameters {
+            .maxPopulation = 1000000
+        } },
+        { "cmn", ::genetic_algorithm::cmn::parameters {
+            .initialPopulation = 100,
+            .maxPopulation = 1000,
+            .crossoversPerGeneration = 11,
+            .mutationsPerGeneration = 7,
+            .nMin = 10,
+            .nCrowd = 20,
+            .nTry = 20,
+            .targetClosestAvg = 2
+        } }
+    };
+    std::optional<std::string> method;
     std::optional<int> target;
+    std::optional<double> precision;
+    std::optional<std::uint64_t> generationLimit;
 
     try {
         namespace po = boost::program_options;
@@ -73,6 +81,8 @@ auto main(int argc, char *argv[]) -> int {
         desc.add_options()
             ("help,h", "produce help message")
             ("method", po::value<std::string>(), "optimization method")
+            ("precision,p", po::value<double>(), "precision, mesh size")
+            ("limit,l", po::value<std::uint64_t>(), "generation limit, max generations count")
         ;
         po::positional_options_description positional;
         positional.add("method", 1);
@@ -87,35 +97,76 @@ auto main(int argc, char *argv[]) -> int {
         po::notify(vm);
 
         if (vm.count("help")) {
-            std::cout << desc << "\n";
-            return 1;
+            std::cout << desc << std::endl;
+            return 0;
+        }
+        if (vm.count("method")) {
+            auto str = vm["method"].as<std::string>();
+            method = str;
         }
         if (vm.count("function")) {
             auto str = vm["function"].as<std::string>();
-            target = maybe_int(str);
+            target = optional_parse<int>(str);
             if (target) {
-                std::cout << "Invalid target: "  << str << "\n";
+                std::cerr << "\nInvalid target: "  << str << std::endl;
                 return 1;
             }
         }
-
+        if (vm.count("precision")) {
+            auto str = vm["precision"].as<std::string>();
+            precision = optional_parse<double>(str);
+        }
+        if (vm.count("limit")) {
+            auto str = vm["limit"].as<std::string>();
+            generationLimit = optional_parse<std::uint64_t>(str);
+        }
     }
     catch (std::exception& e) {
-
+        std::cerr << "\nAn error occured: " << e.what() << std::endl;
+        //std::cout << desc << std::endl;
+        return 1;
     }
 
+    auto selectedTargetEntry = availableTargets.find(target.value());
+    if (availableTargets.cend() == selectedTargetEntry) {
+        std::cerr << "\nInvalid target: " << method.value() << "\nAvailable targets: ";
+        for (const auto &[key, value]: availableTargets) {
+            std::cerr << key << ' ';
+        }
+        std::cerr << std::endl;
+        return 1;
+    }
+    auto [fitness, bounds] = selectedTargetEntry->second;
 
-    auto [fitness, bounds] = select_target<double>(0);
+    auto defaultParamsEntry = defaultParams.find(method.value());
+    if (defaultParams.cend() == defaultParamsEntry) {
+        std::cerr << "\nUnsupported method: " << method.value() << "\nSupported methods: ";
+        for (const auto &[key, value]: defaultParams) {
+            std::cerr << key << ' ';
+        }
+        std::cerr << std::endl;
+        return 1;
+    }
+    auto paramsVariant = defaultParamsEntry->second;
 
-    auto params = ::genetic_algorithm::cmn_parameters {};
-    params.initialPopulation = 100;
-    params.maxPopulation = 1000;
-    params.crossoversPerGeneration = 11;
-    params.mutationsPerGeneration = 7;
-    params.nMin = 10;
-    params.nCrowd = 20;
-    params.nTry = 20;
-    params.targetClosestAvg = 2;
+    Json::Value configuration;
+    Json::CharReaderBuilder builder;
+    //builder["collectComments"] = true;
+    JSONCPP_STRING errs;
+    bool success = Json::parseFromStream(builder, std::cin, &configuration, &errs);
+    if (success) {
+        Json::Value methodConfig = configuration[method.value()];
+        std::visit([&methodConfig](auto &params) {
+            ::genetic_algorithm::common::maybe_set<std::decay_t<decltype(params)>> {
+                params
+            }.from_json(methodConfig);
+        }, paramsVariant);
+    }
+    else {
+        std::visit([](auto &params) {
+            std::cin >> params;
+        }, paramsVariant);
+    }
 
     auto printEvery10 = [](std::uint64_t gen, std::size_t size, const std::vector<std::valarray<double>>& population, const std::vector<double>& fitness) {
         if (gen % 10 == 0) {
@@ -129,38 +180,61 @@ auto main(int argc, char *argv[]) -> int {
     auto printPopulationSize = [](std::uint64_t gen, std::size_t size, const std::vector<std::valarray<double>>& population, const std::vector<double>& fitness) {
         std::cout << "\nGeneration " << gen << ", population size " << size;
     };
-    auto cmnGA = params.make_optimizer(printPopulationSize);
 
-    auto resolution = std::vector<std::uint32_t>{ 10000, 10000 };
+    auto optimizerVariant = std::visit(overloaded {
+        [](const ::genetic_algorithm::dummy::parameters &params) {
+            return params.make_optimizer();
+        },
+        [generationLimit, printPopulationSize](const ::genetic_algorithm::cmn::parameters &params) {
+            return params.make_optimizer(generationLimit.value(), printPopulationSize);
+        }
+    }, paramsVariant);
+
+    auto resolution = std::vector<std::uint32_t>(bounds.size());
+    for (std::size_t k = 0; k < bounds.size(); ++k) {
+        auto count = std::abs(bounds[k].first - bounds[k].second) / precision.value();
+        resolution[k] = static_cast<std::uint32_t>(std::ceil(count)) + 1;
+    }
+
     auto space = ::genetic_algorithm::common::make_space(bounds, resolution);
 
     std::random_device rd;
-    std::mt19937_64 gen(rd());
-    auto [result, generation, real, vals] = cmnGA.optimize(gen, space, fitness);
+    std::mt19937_64 gen { rd() };
+    auto resultVariant = std::visit([&gen, &space, fitness](const auto &optimizer) { 
+        return optimizer.optimize(gen, space, fitness);
+    }, optimizerVariant);
+
+    std::visit(overloaded {
+        [](const ::genetic_algorithm::dummy::result<target_type> &result) {
+            std::cout << "\nDummy" << std::endl;
+        },
+        [](const ::genetic_algorithm::cmn::result<target_type> &result) {
+            switch (result.status) {
+            case ::genetic_algorithm::cmn::status::CONVERGED:
+                std::cout << "\nOptimization completed on generation " << result.generation
+                        << " by converging";
+                break;
+            case ::genetic_algorithm::cmn::status::REACHED_GENERATION_LIMIT:
+                std::cout << "\nOptimization completed on generation " << result.generation
+                        << " by reaching generation limit";
+                break;
+            case ::genetic_algorithm::cmn::status::REACHED_POPULATION_LIMIT:
+                std::cout << "\nOptimization completed on generation " << result.generation
+                        << " by reaching population limit";
+                break;
+            default:
+                std::cout << "Optimization finished on generation " << result.generation 
+                        << " with unexpected result: " << static_cast<int>(result.status);
+                break;
+            }
+            std::cout << "\nFinal population size: " << result.population.size();
+            for (std::size_t k = 0; k < result.population.size(); ++k) {
+                std::cout << "\n" << result.population[k] << " -> " << result.values[k];
+            }
+            std::cout << std::endl;
+        }
+    }, resultVariant);
     
-    switch (result) {
-        case ::genetic_algorithm::cmn_result::CONVERGED:
-            std::cout << "\nOptimization completed on generation " << generation 
-                      << " by converging";
-            break;
-        case ::genetic_algorithm::cmn_result::REACHED_GENERATION_LIMIT:
-            std::cout << "\nOptimization completed on generation " << generation 
-                      << " by reaching generation limit";
-            break;
-        case ::genetic_algorithm::cmn_result::REACHED_POPULATION_LIMIT:
-            std::cout << "\nOptimization completed on generation " << generation 
-                      << " by reaching population limit";
-            break;
-        default:
-            std::cout << "Optimization finished on generation " << generation 
-                      << " with unexpected result: " << static_cast<int>(result);
-            break;
-    }
-    std::cout << "\nFinal population size: " << real.size();
-    for (std::size_t k = 0; k < real.size(); ++k) {
-        std::cout << "\n" << real[k] << " -> " << vals[k];
-    }
-    std::cout << std::endl;
     return 0;
 }
 

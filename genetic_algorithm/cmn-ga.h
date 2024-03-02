@@ -2,6 +2,7 @@
 #define GENETIC_ALGORITHM__CMN_GA_H_
 
 #include <algorithm>
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <cmath>
@@ -9,15 +10,21 @@
 #include <iostream>
 #include <iterator>
 #include <functional>
+#include <optional>
 #include <random>
 #include <tuple>
 #include <valarray>
 #include <vector>
 
+#include <json/json.h>
+
 #include "common/optimizer.h"
+#include "common/maybe_set.h"
 #include "common/space.h"
 
-namespace genetic_algorithm {
+namespace genetic_algorithm::cmn {
+
+namespace detail {
 
 template<class InputIt, class Distance>
 inline auto advance(InputIt it, Distance n) {
@@ -26,7 +33,16 @@ inline auto advance(InputIt it, Distance n) {
     return tempIt;
 }
 
-enum class cmn_result: int {
+template<typename T>
+void load_from_json(const Json::Value &json, T &val) {
+    if (json.is<T>()) {
+        val = json.as<T>();
+    }
+}
+
+}   //-- namespace detail --
+
+enum class status: int {
     // UNEXPECTED
     UNABLE_TO_ADD_OFFSPRINGS = -2,
     IN_PROGRESS = -1,
@@ -36,10 +52,19 @@ enum class cmn_result: int {
     REACHED_POPULATION_LIMIT = 2,
 };
 
+template<typename T>
+struct result {
+    status status;
+    std::uint64_t generation;
+    std::vector<std::valarray<T>> population;
+    std::vector<T> values;
+};
+
+
 template<class OnNextGeneration>
-class cmn_optimizer: public common::optimizer<cmn_optimizer<OnNextGeneration>> {
+class optimizer: public common::optimizer<optimizer<OnNextGeneration>> {
 public:
-    cmn_optimizer(
+    optimizer(
         const std::size_t initialPopulation,
         const std::size_t maxPopulation,
 	    const std::size_t crossoversPerGeneration,
@@ -47,8 +72,8 @@ public:
 	    const int nMin,
 	    const int nCrowd,
 	    const int nTry,
+        const double targetClosestAvg,
         const std::size_t generationLimit,
-	    const double targetClosestAvg,
         OnNextGeneration onNextGneration)
     : mInitialPopulation(initialPopulation)
     , mMaxPopulation(maxPopulation)
@@ -57,14 +82,18 @@ public:
     , mMin(nMin)
     , mCrowd(nCrowd)
     , mTry(nTry)
-    , mGenerationLimit(generationLimit)
     , mTargetClosestAvg(targetClosestAvg)
+    , mGenerationLimit(generationLimit)
     , mOnNextGeneration(onNextGneration)
     {}
-    ~cmn_optimizer() = default;
+    ~optimizer() = default;
 
     template<class Gen, typename T1, typename T2>
-    auto optimize(Gen& generator, const common::space<T1, T2>& space, const std::function<T1(const std::valarray<T1>&)> fitness) const {
+    auto optimize(
+        Gen& generator, 
+        const common::space<T1, T2>& space, 
+        const std::function<T1(const std::valarray<T1>&)> fitness
+    ) const -> result<T1> {
         // used to allocate memory
         const std::size_t increaseCapacity = (mInitialPopulation > mCrossoversPerGeneration + mMutationsPerGeneration) 
             ? mInitialPopulation
@@ -126,7 +155,7 @@ public:
             increaseReal[k] = space(increaseMesh[k]);
         }
 
-        cmn_result result = cmn_result::IN_PROGRESS;
+        status status = status::IN_PROGRESS;
         std::uint64_t generation = 0;
         int failedIncreaseCounter = 0;
 
@@ -138,7 +167,7 @@ public:
                 --failedIncreaseCounter;
             }
             if (!failedIncreaseCounter) {
-                result = cmn_result::UNABLE_TO_ADD_OFFSPRINGS;
+                status = status::UNABLE_TO_ADD_OFFSPRINGS;
                 break;
             }
             
@@ -155,7 +184,7 @@ public:
             increaseSize = 0;
             
             if (populationSize >= mMaxPopulation) {
-                result = cmn_result::REACHED_POPULATION_LIMIT;
+                status = status::REACHED_POPULATION_LIMIT;
                 break;
             }
 
@@ -170,7 +199,7 @@ public:
             //-- Finding local optima --
             {
                 auto begin = mask.begin();
-                auto end = advance(mask.begin(), populationSize);
+                auto end = detail::advance(mask.begin(), populationSize);
                 std::fill(begin, end, true);
             }
             for (std::size_t i = 0; i < populationSize; ++i) {
@@ -181,10 +210,10 @@ public:
                     auto distance = common::euclidean_distance(populationReal[i], populationReal[j]);
                     temporaryDataCopy[j] = destructibleDataCopy[j] = distance;
                 }
-                auto nth = advance(destructibleDataCopy.begin(), mMin);
+                auto nth = detail::advance(destructibleDataCopy.begin(), mMin);
                 {
                     auto begin = destructibleDataCopy.begin();
-                    auto end = advance(destructibleDataCopy.begin(), populationSize);
+                    auto end = detail::advance(destructibleDataCopy.begin(), populationSize);
                     std::nth_element(begin, nth, end);
                 }
                 {
@@ -220,20 +249,19 @@ public:
                 closestAvg = accumulator / localOptimaNumber;
             }
             if (closestAvg < mTargetClosestAvg) {
-                result = cmn_result::CONVERGED;
+                status = status::CONVERGED;
                 break;
             }
 
             //-- Calculating adjusted fitness --
             {
                 auto begin = proximityWeight.begin();
-                auto end = begin;
-                std::advance(end, populationSize);
+                auto end = detail::advance(proximityWeight.begin(), populationSize);
                 std::fill(begin, end, static_cast<T1>(0.0));
             }
             {
                 auto begin = fitnessWeighted.begin();
-                auto end = advance(fitnessWeighted.begin(), populationSize);
+                auto end = detail::advance(fitnessWeighted.begin(), populationSize);
                 std::fill(begin, end, static_cast<T1>(0.0));
             }
             for (std::size_t j = 0; j < populationSize; ++j) {
@@ -243,7 +271,7 @@ public:
                 {
                     // Calculating linear-scaled fitness per optima
                     auto begin = fitnessValues.cbegin();
-                    auto end = advance(fitnessValues.cbegin(), populationSize);
+                    auto end = detail::advance(fitnessValues.cbegin(), populationSize);
                     auto fitnessOptimusDiff = fitnessValues[j] - fitnessValueMin;
                     std::transform(begin, end, fitnessScaled.begin(), [fitnessValueMin, fitnessOptimusDiff] (const auto f) {
                         return (f - fitnessValueMin) / fitnessOptimusDiff;
@@ -252,21 +280,21 @@ public:
                 {
                     // Making a copy of linear-scaled fitness, because nth_element rearranges elements
                     auto begin = fitnessScaled.cbegin();
-                    auto end = advance(fitnessScaled.cbegin(), populationSize);
+                    auto end = detail::advance(fitnessScaled.cbegin(), populationSize);
                     std::copy(begin, end, destructibleDataCopy.begin());
                 }
-                auto nth = advance(destructibleDataCopy.begin(), populationSize / 2);
+                auto nth = detail::advance(destructibleDataCopy.begin(), populationSize / 2);
                 {
                     // Finding median of linear-scaled fitness
                     auto begin = destructibleDataCopy.begin();
-                    auto end = advance(destructibleDataCopy.begin(), populationSize);
+                    auto end = detail::advance(destructibleDataCopy.begin(), populationSize);
                     std::nth_element(begin, nth, end);
                 }
                 {
                     // Calculating exponentially-scaled fitness per optima
                     auto power =  std::log(0.5) / std::log(destructibleDataCopy[populationSize / 2]);
                     auto begin = fitnessScaled.cbegin();
-                    auto end = advance(fitnessScaled.cbegin(), populationSize);
+                    auto end = detail::advance(fitnessScaled.cbegin(), populationSize);
                     std::transform(begin, end, fitnessScaled.begin(), [power] (const auto f) {
                         return std::pow(f, power);
                     });
@@ -281,7 +309,7 @@ public:
             {
                 // Normalizing overall scaled fitness by proximity
                 auto begin = proximityWeight.cbegin();
-                auto end = advance(proximityWeight.cbegin(), populationSize);
+                auto end = detail::advance(proximityWeight.cbegin(), populationSize);
                 std::transform(begin, end, fitnessWeighted.cbegin(), fitnessWeighted.begin(), [](const auto p, const auto pf) {
                     auto wf = pf / p;
                     return std::isnan(wf) ? static_cast<T1>(1.0) : wf;
@@ -292,12 +320,12 @@ public:
             double accumulator = 0.0;
             {
                 auto begin = fitnessWeighted.cbegin();
-                auto end = advance(fitnessWeighted.cbegin(), populationSize);
+                auto end = detail::advance(fitnessWeighted.cbegin(), populationSize);
                 accumulator = std::accumulate(begin, end, accumulator);
             }
             {
                 auto begin = fitnessWeighted.cbegin();
-                auto end = advance(fitnessWeighted.cbegin(), populationSize);
+                auto end = detail::advance(fitnessWeighted.cbegin(), populationSize);
                 std::transform(begin, end, probability.begin(), [accumulator](const auto w) {
                     return w / accumulator;
                 });
@@ -305,7 +333,7 @@ public:
             {
                 // Fitness-Proportionate selection (FPS) for P1
                 auto begin = probability.cbegin();
-                auto end = advance(probability.cbegin(), populationSize);
+                auto end = detail::advance(probability.cbegin(), populationSize);
                 auto p1 = std::discrete_distribution<std::size_t>(begin, end);
                 for (std::size_t k = 0; k < mCrossoversPerGeneration; ++k) {
                     crossover[k].first = p1(generator);
@@ -319,7 +347,7 @@ public:
                         : 1.0 / common::euclidean_distance(populationReal[crossover[k].first], populationReal[i]);
                 }
                 auto begin = probability.cbegin();
-                auto end = advance(probability.cbegin(), populationSize);
+                auto end = detail::advance(probability.cbegin(), populationSize);
                 auto p2 = std::discrete_distribution<std::size_t>(begin, end);
                 auto fitnessMax = std::numeric_limits<T1>::min();
                 for (std::size_t crowd = 0; crowd < mCrowd; ++crowd) {
@@ -332,7 +360,7 @@ public:
             {
                 // Flags for crossover pairs used
                 auto begin = mask.begin();
-                auto end = advance(mask.begin(), mCrossoversPerGeneration);
+                auto end = detail::advance(mask.begin(), mCrossoversPerGeneration);
                 std::fill(begin, end, false);
                 // Crossover
                 std::size_t remainingTries = mTry;
@@ -386,7 +414,7 @@ public:
 
         populationReal.resize(populationSize);
         fitnessValues.resize(populationSize);
-        return std::make_tuple(result, generation, populationReal, fitnessValues);
+        return result<T1> { status, generation, populationReal, fitnessValues };
     }
 
 protected:
@@ -434,18 +462,18 @@ private:
 	const int mMin;
 	const int mCrowd;
 	const int mTry;
+    const double mTargetClosestAvg;
     const std::uint64_t mGenerationLimit;
-	const double mTargetClosestAvg;
 
     const OnNextGeneration mOnNextGeneration;
     
     const int mFailedIncreaseCounterDefault = 5;
 };
 
-struct cmn_parameters {
+struct parameters {
     template<class OnNextGeneration>
-    auto make_optimizer(OnNextGeneration onNextGeneration) const {
-        return cmn_optimizer<OnNextGeneration>(
+    auto make_optimizer(std::uint64_t generationLimit, OnNextGeneration onNextGeneration) const {
+        return optimizer<OnNextGeneration>(
             initialPopulation,
             maxPopulation,
             crossoversPerGeneration,
@@ -454,8 +482,8 @@ struct cmn_parameters {
             nTry > crossoversPerGeneration + mutationsPerGeneration
                 ? nTry
                 : crossoversPerGeneration + mutationsPerGeneration,
-            generationLimit,
             targetClosestAvg,
+            generationLimit,
             onNextGeneration
         );
     }
@@ -467,24 +495,65 @@ struct cmn_parameters {
 	int nMin;
 	int nCrowd;
 	int nTry;
-	
-    std::uint64_t generationLimit;
 	double targetClosestAvg;
 };
 
 template<typename CharT>
-std::basic_istream<CharT>& operator<<(std::basic_istream<CharT>& is, cmn_parameters &params) {
-    is >> params.initialPopulation >> params.crossoversPerGeneration >> params.mutationsPerGeneration;
+std::basic_istream<CharT>& operator>>(std::basic_istream<CharT> &is, parameters &params) {
+    is >> params.initialPopulation >> params.maxPopulation;
+    is >> params.crossoversPerGeneration >> params.mutationsPerGeneration;
     is >> params.nMin >> params.nCrowd >> params.nTry;
-    is >> params.maxPopulation;
+    is >> params.targetClosestAvg;
     return is;
 }
 
 template<typename CharT>
-std::basic_ostream<CharT>& operator>>(std::basic_ostream<CharT>& os, cmn_parameters &params) {
+std::basic_ostream<CharT>& operator<<(std::basic_ostream<CharT>& os, parameters &params) {
+    os << params.initialPopulation << " " << params.maxPopulation << "\n";
+    os << params.crossoversPerGeneration << " " << params.mutationsPerGeneration << "\n";
+    os << params.nMin << " " << params.nCrowd << " " << params.nTry << "\n";
+    os << params.targetClosestAvg << std::endl;
     return os;
 }
 
-}   //-- namespace genetic_algorithm --
+}   //-- namespace genetic_algorithm::cmn --
+
+namespace genetic_algorithm::common {
+
+template<>
+struct maybe_set<cmn::parameters> {
+    
+    cmn::parameters &params;
+
+    maybe_set<cmn::parameters> &from_json(const Json::Value &json) {
+        maybe_set<std::size_t> { 
+            params.initialPopulation 
+        }.from_json(json["initial-population"]);
+        maybe_set<std::size_t> { 
+            params.maxPopulation 
+        }.from_json(json["max-population"]);
+        maybe_set<std::size_t> { 
+            params.crossoversPerGeneration 
+        }.from_json(json["crossovers-per-generation"]);
+        maybe_set<std::size_t> { 
+            params.mutationsPerGeneration 
+        }.from_json(json["mutations-per-generation"]);
+        maybe_set<int> { 
+            params.nMin 
+        }.from_json(json["N-min"]);
+        maybe_set<int> { 
+            params.nCrowd 
+        }.from_json(json["N-crowd"]);
+        maybe_set<int> { 
+            params.nTry 
+        }.from_json(json["N-try"]);
+        maybe_set<double> { 
+            params.targetClosestAvg 
+        }.from_json(json["target-closest-average"]);
+        return *this;
+    }
+};
+
+}   //-- namespace genetic_algorithm::common --
 
 #endif // GENETIC_ALGORITHM__CMN_GA_H_

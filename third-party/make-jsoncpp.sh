@@ -37,6 +37,7 @@ if [ -d "$BUILD_DIR" ]; then
     rm -rf "$BUILD_DIR"
 fi
 mkdir "$BUILD_DIR"
+
 pushd "$BUILD_DIR"
 cmake -DCMAKE_INSTALL_PREFIX="$INSTALL_PREFIX" ../
 make install

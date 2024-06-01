@@ -1,5 +1,5 @@
-#ifndef GENETIC_ALGORITHM__DUMMY_H_
-#define GENETIC_ALGORITHM__DUMMY_H_
+#ifndef GENETIC_ALGORITHM__DUMMY__DUMMY_H_
+#define GENETIC_ALGORITHM__DUMMY__DUMMY_H_
 
 #include <cstddef>
 #include <cstdint>
@@ -8,30 +8,46 @@
 
 #include <json/json.h>
 
-#include "common/optimizer.h"
-#include "common/maybe_set.h"
-#include "common/space.h"
+#include "../optimizer.h"
+#include "../maybe_set.h"
+#include "../space.h"
 
-namespace genetic_algorithm::dummy {
+namespace genetic_algorithm {
 
-enum class status: int {
-    // UNEXPECTED
-    UNABLE_TO_ADD_OFFSPRINGS = -2,
-    IN_PROGRESS = -1,
-    // SUCCESS
-    CONVERGED = 0,
-    REACHED_GENERATION_LIMIT = 1,
-    REACHED_POPULATION_LIMIT = 2,
+namespace dummy {
+
+struct parameters {
+
+    template<class OnNextGeneration>
+    auto make_optimizer(OnNextGeneration onNextGeneration) const {
+        return optimizer<OnNextGeneration, parameters> { maxPopulation };
+    }
+
+    std::size_t maxPopulation;
 };
 
+template<typename CharT>
+std::basic_istream<CharT>& operator>>(std::basic_istream<CharT> &is, parameters &params) {
+    return is;
+}
+
+template<typename CharT>
+std::basic_ostream<CharT>& operator<<(std::basic_ostream<CharT>& os, parameters &params) {
+    return os;
+}
+
+} //-- namespace dummy --
+
 template<typename T>
-struct result {
+struct result<T, dummy::parameters> {
     status status;
+    std::size_t size;
     std::vector<std::valarray<T>> population;
     std::vector<T> values;
 };
 
-class optimizer: public common::optimizer<optimizer> {
+template<class OnNextGeneration>
+class optimizer<OnNextGeneration, dummy::parameters> {
 public:
     optimizer(const std::size_t maxPopulation)
     : mMaxPopulation(maxPopulation)
@@ -41,37 +57,31 @@ public:
     template<class Gen, typename T1, typename T2>
     auto optimize(
         Gen& generator, 
-        const common::space<T1, T2>& space, 
+        const space<T1, T2>& space, 
         const std::function<T1(const std::valarray<T1>&)> fitness
-    ) const -> result<T1> {
+    ) const -> const result<T1, dummy::parameters> {
         std::vector<std::valarray<T1>> population = space.rand_n_real(generator, mMaxPopulation);
         std::vector<T1> evaluations(mMaxPopulation);
         for (std::size_t k = 0; k < mMaxPopulation; ++k) {
             evaluations[k] = fitness(population[k]);
         }
-        return result<T1> { status::CONVERGED, population, evaluations };
+        return result<T1, dummy::parameters> { status::CONVERGED, mMaxPopulation, population, evaluations };
     }
 
 private:
     const std::size_t mMaxPopulation;
 };
 
-struct parameters {
-    auto make_optimizer() const {
-        return optimizer { maxPopulation };
-    }
 
-    std::size_t maxPopulation;
-};
 
 template<typename CharT>
-std::basic_istream<CharT>& operator>>(std::basic_istream<CharT> &is, parameters &params) {
+std::basic_istream<CharT>& operator>>(std::basic_istream<CharT> &is, dummy::parameters &params) {
     is >> params.maxPopulation;
     return is;
 }
 
 template<typename CharT>
-std::basic_ostream<CharT>& operator<<(std::basic_ostream<CharT>& os, parameters &params) {
+std::basic_ostream<CharT>& operator<<(std::basic_ostream<CharT>& os, dummy::parameters &params) {
     os << params.maxPopulation;
     return os;
 }
@@ -93,6 +103,6 @@ struct maybe_set<dummy::parameters> {
     }
 };
 
-}   //-- namespace genetic_algorithm::common --
+}   //-- namespace genetic_algorithm::dummy --
 
-#endif // GENETIC_ALGORITHM__DUMMY_H_
+#endif // GENETIC_ALGORITHM__DUMMY__DUMMY_H_

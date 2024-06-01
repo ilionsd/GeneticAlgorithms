@@ -1,5 +1,5 @@
-#ifndef GENETIC_ALGORITHM__COMMON__SPACE_H_
-#define GENETIC_ALGORITHM__COMMON__SPACE_H_
+#ifndef GENETIC_ALGORITHM__SPACE_H_
+#define GENETIC_ALGORITHM__SPACE_H_
 
 #include <cstddef>
 #include <ostream>
@@ -8,7 +8,7 @@
 #include <valarray>
 #include <vector>
 
-namespace genetic_algorithm::common {
+namespace genetic_algorithm {
 
 template<typename T1, typename T2>
 class space {
@@ -163,6 +163,6 @@ inline auto euclidean_distance(const std::valarray<T>& a, const std::valarray<T>
     return std::sqrt(underroot);
 }
 
-} // namespace genetic_algorithm::common
+} // namespace genetic_algorithm
 
-#endif // GENETIC_ALGORITHM__COMMON__SPACE_H_
+#endif // GENETIC_ALGORITHM__SPACE_H_

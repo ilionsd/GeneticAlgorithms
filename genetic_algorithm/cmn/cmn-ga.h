@@ -18,11 +18,64 @@
 
 #include <json/json.h>
 
-#include "common/optimizer.h"
-#include "common/maybe_set.h"
-#include "common/space.h"
+#include "../parameters.h"
+#include "../optimizer.h"
+#include "../maybe_set.h"
+#include "../space.h"
 
-namespace genetic_algorithm::cmn {
+namespace genetic_algorithm {
+
+namespace cmn {
+
+struct parameters {
+
+    template<class OnNextGeneration>
+    auto make_optimizer(std::uint64_t generationLimit, OnNextGeneration onNextGeneration) const {
+        return optimizer<OnNextGeneration, parameters>(
+            initialPopulation,
+            maxPopulation,
+            crossoversPerGeneration,
+            mutationsPerGeneration,
+            nMin, nCrowd,
+            nTry > crossoversPerGeneration + mutationsPerGeneration
+                ? nTry
+                : crossoversPerGeneration + mutationsPerGeneration,
+            targetClosestAvg,
+            generationLimit,
+            onNextGeneration
+        );
+    }
+
+    std::size_t initialPopulation;
+    std::size_t maxPopulation;
+	std::size_t crossoversPerGeneration;
+	std::size_t mutationsPerGeneration;
+	int nMin;
+	int nCrowd;
+	int nTry;
+	double targetClosestAvg;
+};
+
+template<typename CharT>
+std::basic_istream<CharT>& operator>>(std::basic_istream<CharT> &is, parameters &params) {
+    is >> params.initialPopulation >> params.maxPopulation;
+    is >> params.crossoversPerGeneration >> params.mutationsPerGeneration;
+    is >> params.nMin >> params.nCrowd >> params.nTry;
+    is >> params.targetClosestAvg;
+    return is;
+}
+
+template<typename CharT>
+std::basic_ostream<CharT>& operator<<(std::basic_ostream<CharT>& os, parameters &params) {
+    os << params.initialPopulation << " " << params.maxPopulation << "\n";
+    os << params.crossoversPerGeneration << " " << params.mutationsPerGeneration << "\n";
+    os << params.nMin << " " << params.nCrowd << " " << params.nTry << "\n";
+    os << params.targetClosestAvg << std::endl;
+    return os;
+}
+
+}   //-- namespace genetic_algorithm::cmn --
+
 
 namespace detail {
 
@@ -42,27 +95,58 @@ void load_from_json(const Json::Value &json, T &val) {
 
 }   //-- namespace detail --
 
-enum class status: int {
-    // UNEXPECTED
-    UNABLE_TO_ADD_OFFSPRINGS = -2,
-    IN_PROGRESS = -1,
-    // SUCCESS
-    CONVERGED = 0,
-    REACHED_GENERATION_LIMIT = 1,
-    REACHED_POPULATION_LIMIT = 2,
+
+template<>
+class model<cmn::parameters> {
+    model()
+    : initialPopulation("initial-population")
+    , maxPopulation("max-population")
+    , crossoversPerGeneration("crossovers-per-generation")
+    , mutationsPerGeneration("mutations-per-generation")
+    , nMin("N-min")
+    , nCrowd("N-crowd")
+    , nTry("N-try")
+    , targetClosestAvg("target-closest-average")
+    {}
+
+    model<cmn::parameters>&
+    read_json(Json::Value &json) {
+        std::array success = {
+            initialPopulation.load_from(json),
+            maxPopulation.load_from(json),
+            crossoversPerGeneration.load_from(json),
+            mutationsPerGeneration.load_from(json),
+            nMin.load_from(json),
+            nCrowd.load_from(json),
+            nTry.load_from(json),
+            targetClosestAvg.load_from(json)
+        };
+        return *this;
+    }
+
+    entry<std::size_t> initialPopulation;
+    entry<std::size_t> maxPopulation;
+	entry<std::size_t> crossoversPerGeneration;
+	entry<std::size_t> mutationsPerGeneration;
+	entry<int> nMin;
+	entry<int> nCrowd;
+	entry<int> nTry;
+	entry<double> targetClosestAvg;
 };
 
-template<typename T>
-struct result {
+
+template <typename T>
+struct result<T, cmn::parameters> {
     status status;
     std::uint64_t generation;
+    std::size_t size;
     std::vector<std::valarray<T>> population;
     std::vector<T> values;
 };
 
 
 template<class OnNextGeneration>
-class optimizer: public common::optimizer<optimizer<OnNextGeneration>> {
+class optimizer<OnNextGeneration, cmn::parameters> {
 public:
     optimizer(
         const std::size_t initialPopulation,
@@ -91,16 +175,16 @@ public:
     template<class Gen, typename T1, typename T2>
     auto optimize(
         Gen& generator, 
-        const common::space<T1, T2>& space, 
+        const space<T1, T2>& space, 
         const std::function<T1(const std::valarray<T1>&)> fitness
-    ) const -> result<T1> {
+    ) const -> const result<T1, cmn::parameters> {
         // used to allocate memory
         const std::size_t increaseCapacity = (mInitialPopulation > mCrossoversPerGeneration + mMutationsPerGeneration) 
             ? mInitialPopulation
             : mCrossoversPerGeneration + mMutationsPerGeneration;
         const std::size_t populationCapacity = ((mInitialPopulation > mMaxPopulation)
             ? mInitialPopulation
-            : mMaxPopulation) 
+            : mMaxPopulation)
             + mCrossoversPerGeneration + mMutationsPerGeneration;
         
         std::size_t memoryUsage = 0;
@@ -160,6 +244,7 @@ public:
         int failedIncreaseCounter = 0;
 
         while (true) {
+
             if (increaseSize) {
                 failedIncreaseCounter = mFailedIncreaseCounterDefault;
             }
@@ -207,7 +292,7 @@ public:
                     continue;
                 }
                 for (std::size_t j = 0; j < populationSize; ++j) {
-                    auto distance = common::euclidean_distance(populationReal[i], populationReal[j]);
+                    auto distance = euclidean_distance(populationReal[i], populationReal[j]);
                     temporaryDataCopy[j] = destructibleDataCopy[j] = distance;
                 }
                 auto nth = detail::advance(destructibleDataCopy.begin(), mMin);
@@ -238,7 +323,7 @@ public:
                         ++localOptimaNumber;
                         auto closest = std::numeric_limits<double>::max();
                         for (std::size_t j = 0; j < populationSize; ++j) {
-                            auto distance = common::euclidean_distance(populationMesh[i], populationMesh[j]);
+                            auto distance = euclidean_distance(populationMesh[i], populationMesh[j]);
                             if (i != j && closest > distance) {
                                 closest = distance;
                             }
@@ -301,7 +386,7 @@ public:
                 }
                 // Combining scaled fitness per optima into a scaled fitness overall
                 for (std::size_t i = 0; i < populationSize; ++i) {
-                    auto proximity = static_cast<T1>(1.0) / common::euclidean_distance(populationReal[j], populationReal[i]);
+                    auto proximity = static_cast<T1>(1.0) / euclidean_distance(populationReal[j], populationReal[i]);
                     proximityWeight[i] += proximity;
                     fitnessWeighted[i] += proximity * fitnessScaled[i];
                 }
@@ -344,7 +429,7 @@ public:
                 for (std::size_t i = 0; i < populationSize; ++i) {
                     probability[i] = (i == crossover[k].first)
                         ? 0.0
-                        : 1.0 / common::euclidean_distance(populationReal[crossover[k].first], populationReal[i]);
+                        : 1.0 / euclidean_distance(populationReal[crossover[k].first], populationReal[i]);
                 }
                 auto begin = probability.cbegin();
                 auto end = detail::advance(probability.cbegin(), populationSize);
@@ -375,7 +460,7 @@ public:
                         std::size_t closestIndex = 0;
                         auto minDistance = std::numeric_limits<T1>::max();
                         for (std::size_t i = 1; i < populationSize; ++i) {
-                            auto distance = common::euclidean_distance(offspringReal, populationReal[i]);
+                            auto distance = euclidean_distance(offspringReal, populationReal[i]);
                             if (minDistance > distance) {
                                 std::tie(minDistance, closestIndex) = std::tie(distance, i);
                             }
@@ -398,7 +483,7 @@ public:
                         std::size_t closestIndex = 0;
                         auto minDistance = std::numeric_limits<T1>::max();
                         for (std::size_t i = 1; i < populationSize; ++i) {
-                            auto distance = common::euclidean_distance(offspringReal, populationReal[i]);
+                            auto distance = euclidean_distance(offspringReal, populationReal[i]);
                             if (minDistance > distance) {
                                 std::tie(minDistance, closestIndex) = std::tie(distance, i);
                             }
@@ -414,10 +499,8 @@ public:
 
         populationReal.resize(populationSize);
         fitnessValues.resize(populationSize);
-        return result<T1> { status, generation, populationReal, fitnessValues };
+        return result<T1, cmn::parameters> { status, generation, populationSize, populationReal, fitnessValues };
     }
-
-protected:
 
     template<typename T>
     auto r_min(const T fitness, const std::uint64_t generation) const {
@@ -470,55 +553,6 @@ private:
     const int mFailedIncreaseCounterDefault = 5;
 };
 
-struct parameters {
-    template<class OnNextGeneration>
-    auto make_optimizer(std::uint64_t generationLimit, OnNextGeneration onNextGeneration) const {
-        return optimizer<OnNextGeneration>(
-            initialPopulation,
-            maxPopulation,
-            crossoversPerGeneration,
-            mutationsPerGeneration,
-            nMin, nCrowd,
-            nTry > crossoversPerGeneration + mutationsPerGeneration
-                ? nTry
-                : crossoversPerGeneration + mutationsPerGeneration,
-            targetClosestAvg,
-            generationLimit,
-            onNextGeneration
-        );
-    }
-
-    std::size_t initialPopulation;
-    std::size_t maxPopulation;
-	std::size_t crossoversPerGeneration;
-	std::size_t mutationsPerGeneration;
-	int nMin;
-	int nCrowd;
-	int nTry;
-	double targetClosestAvg;
-};
-
-template<typename CharT>
-std::basic_istream<CharT>& operator>>(std::basic_istream<CharT> &is, parameters &params) {
-    is >> params.initialPopulation >> params.maxPopulation;
-    is >> params.crossoversPerGeneration >> params.mutationsPerGeneration;
-    is >> params.nMin >> params.nCrowd >> params.nTry;
-    is >> params.targetClosestAvg;
-    return is;
-}
-
-template<typename CharT>
-std::basic_ostream<CharT>& operator<<(std::basic_ostream<CharT>& os, parameters &params) {
-    os << params.initialPopulation << " " << params.maxPopulation << "\n";
-    os << params.crossoversPerGeneration << " " << params.mutationsPerGeneration << "\n";
-    os << params.nMin << " " << params.nCrowd << " " << params.nTry << "\n";
-    os << params.targetClosestAvg << std::endl;
-    return os;
-}
-
-}   //-- namespace genetic_algorithm::cmn --
-
-namespace genetic_algorithm::common {
 
 template<>
 struct maybe_set<cmn::parameters> {

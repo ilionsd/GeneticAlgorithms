@@ -9,7 +9,8 @@ find_package(Boost REQUIRED COMPONENTS program_options)
 include_directories(${Boost_INCLUDE_DIRS})
 
 file(GLOB SOURCES
-    genetic_algorithm/common/*.h
+    genetic_algorithm/dummy/*h
+    genetic_algorithm/cmn/*.h
     genetic_algorithm/*.h
     *.h
     *.cpp

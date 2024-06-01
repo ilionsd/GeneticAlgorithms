@@ -1,0 +1,7 @@
+#ifndef GENETIC_ALGORITHMS__GENETIC_ALGORITHM_H_
+#define GENETIC_ALGORITHMS__GENETIC_ALGORITHM_H_
+
+#include "dummy/dummy.h"
+#include "cmn/cmn-ga.h"
+
+#endif //GENETIC_ALGORITHMS__GENETIC_ALGORITHM_H_

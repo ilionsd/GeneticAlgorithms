@@ -1,6 +1,7 @@
 #include <array>
 #include <future>
 #include <iostream>
+#include <numbers>
 #include <random>
 #include <optional>
 #include <thread>
@@ -207,7 +208,7 @@ auto main(int argc, char *argv[]) -> int {
         }
     }, vParams);
 
-    auto precision = oPrecision.value_or(1.0) / M_SQRT2 * 2.0;
+    auto precision = oPrecision.value_or(1.0) / std::numbers::sqrt2 * 2.0;
     auto resolution = std::vector<std::uint32_t>(bounds.size());
     for (std::size_t k = 0; k < bounds.size(); ++k) {
         auto count = std::abs(bounds[k].first - bounds[k].second) / precision;

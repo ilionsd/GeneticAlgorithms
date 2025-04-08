@@ -42,16 +42,6 @@ bool entry<int>::load_from(const Json::Value &json) {
 }
 
 template<>
-bool entry<std::size_t>::load_from(const Json::Value &json) {
-    auto jsonVal = json[name];
-    if (jsonVal.isUInt64()) {
-        value = jsonVal.asUInt64();
-        return true;
-    }
-    return false;
-}
-
-template<>
 bool entry<std::uint64_t>::load_from(const Json::Value &json) {
     auto jsonVal = json[name];
     if (jsonVal.isUInt64()) {

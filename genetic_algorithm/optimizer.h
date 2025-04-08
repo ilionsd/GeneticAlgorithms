@@ -3,6 +3,7 @@
 
 #include <functional>
 #include <valarray>
+#include <utility>
 
 #include "space.h"
 
@@ -20,10 +21,19 @@ enum class status: int {
     REACHED_POPULATION_LIMIT = 2,
 };
 
+
 template<typename T, class Params>
 struct result {
     const status status;
 };
+
+
+template<typename CharT, typename T, class Params>
+inline std::basic_ostream<CharT>& operator<< (std::basic_ostream<CharT>& os, const result<T, Params>& res) {
+    os << static_cast<int>(res.status);
+    return os;
+}
+
 
 template<class OnNextGeneration, class Params>
 struct optimizer {
@@ -40,14 +50,9 @@ struct optimizer {
 };
 
 
-
-template<class Params, class... Ts>
-auto make_optimizer(const Params &params, Ts... args) {
-    return params.make_optimizer(args...);
-}
-
 struct max_optimizer {};
 struct min_optimizer {};
+
 
 } // namespace genetic_algorithm
 

@@ -105,8 +105,11 @@ public:
 
     template<class G>
     auto rand_n_real(G& generator, const std::size_t n) const {
+        std::transform(std::begin(mSize), std::end(mSize), std::begin(mTemp), [](auto val) {
+            return static_cast<real_type>(val - 1);
+        });
         std::vector<std::valarray<real_type>> results(n, std::valarray<real_type>(dimensions));
-        auto right = mLeft + mStep * (mSize - 1);
+        auto right = mLeft + mStep * mTemp;
         for (std::size_t dim = 0; dim < dimensions; ++dim) {
             std::uniform_real_distribution<real_type> dist(mLeft[dim], right[dim]);
             for (std::size_t k = 0; k < n; ++k) {

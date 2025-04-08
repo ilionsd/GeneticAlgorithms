@@ -28,15 +28,18 @@ struct parameters {
 
 template<typename CharT>
 std::basic_istream<CharT>& operator>>(std::basic_istream<CharT> &is, parameters &params) {
+    is >> params.maxPopulation;
     return is;
 }
 
 template<typename CharT>
 std::basic_ostream<CharT>& operator<<(std::basic_ostream<CharT>& os, parameters &params) {
+    os << params.maxPopulation;
     return os;
 }
 
 } //-- namespace dummy --
+
 
 template<typename T>
 struct result<T, dummy::parameters> {
@@ -45,6 +48,14 @@ struct result<T, dummy::parameters> {
     std::vector<std::valarray<T>> population;
     std::vector<T> values;
 };
+
+
+template<typename CharT, typename T>
+inline std::basic_ostream<CharT>& operator<< (std::basic_ostream<CharT>& os, const result<T, dummy::parameters>& res) {
+    os << "\nDummy" << std::endl;
+    return os;
+}
+
 
 template<class OnNextGeneration>
 class optimizer<OnNextGeneration, dummy::parameters> {
@@ -65,7 +76,7 @@ public:
         for (std::size_t k = 0; k < mMaxPopulation; ++k) {
             evaluations[k] = fitness(population[k]);
         }
-        return result<T1, dummy::parameters> { status::CONVERGED, mMaxPopulation, population, evaluations };
+        return { status::CONVERGED, mMaxPopulation, population, evaluations };
     }
 
 private:
@@ -73,36 +84,19 @@ private:
 };
 
 
-
-template<typename CharT>
-std::basic_istream<CharT>& operator>>(std::basic_istream<CharT> &is, dummy::parameters &params) {
-    is >> params.maxPopulation;
-    return is;
-}
-
-template<typename CharT>
-std::basic_ostream<CharT>& operator<<(std::basic_ostream<CharT>& os, dummy::parameters &params) {
-    os << params.maxPopulation;
-    return os;
-}
-
-}   // namespace genetic_algorithm::dummy
-
-namespace genetic_algorithm::common {
-
 template<>
 struct maybe_set<dummy::parameters> {
-    
-    dummy::parameters &params;
 
-    maybe_set<dummy::parameters> &from_json(const Json::Value &json) {
-        maybe_set<std::size_t> { 
-            params.maxPopulation 
+    dummy::parameters& params;
+
+    maybe_set<dummy::parameters>& from_json(const Json::Value& json) {
+        maybe_set<std::size_t> {
+            params.maxPopulation
         }.from_json(json["max-population"]);
         return *this;
     }
 };
 
-}   //-- namespace genetic_algorithm::dummy --
+}   // namespace genetic_algorithm
 
 #endif // GENETIC_ALGORITHM__DUMMY__DUMMY_H_

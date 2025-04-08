@@ -1,5 +1,5 @@
-#ifndef GENETIC_ALGORITHM__COMMON__MAYBE_SET_H_
-#define GENETIC_ALGORITHM__COMMON__MAYBE_SET_H_
+#ifndef GENETIC_ALGORITHM__MAYBE_SET_H_
+#define GENETIC_ALGORITHM__MAYBE_SET_H_
 
 #include <cstddef>
 #include <cstdint>
@@ -7,7 +7,7 @@
 
 #include <json/json.h>
 
-namespace genetic_algorithm::common {
+namespace genetic_algorithm {
 
 template<typename T>
 struct maybe_set {};
@@ -19,18 +19,6 @@ struct maybe_set<int> {
     maybe_set<int> &from_json(const Json::Value &json) {
         if (json.isInt()) {
             val = json.asInt();
-        }
-        return *this;
-    }
-};
-
-template<>
-struct maybe_set<std::size_t> {
-    std::size_t& val;
-
-    maybe_set<std::size_t> &from_json(const Json::Value &json) {
-        if (json.isUInt64()) {
-            val = json.asUInt64();
         }
         return *this;
     }
@@ -61,6 +49,6 @@ struct maybe_set<double> {
 };
 
 
-}   //-- namespace genetic_algorithm::common --
+}   //-- namespace genetic_algorithm --
 
-#endif //GENETIC_ALGORITHM__COMMON__MAYBE_SET_H_
+#endif //GENETIC_ALGORITHM__MAYBE_SET_H_

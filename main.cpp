@@ -43,6 +43,18 @@ template<class... Ts>
 overloaded(Ts...) -> overloaded<Ts...>;
 
 
+template<class... Ts, class Visitor>
+auto map_variant(
+    std::variant<Ts...>& args,
+    Visitor&& visitor
+) {
+    using return_type = std::variant<decltype(visitor(std::get<Ts>(args)))... > ;
+    return std::visit([vis = std::forward<Visitor>(visitor)](auto&& val) {
+        return return_type{ vis(val) };
+    }, args);
+}
+
+
 auto parse_function(const std::string &str) -> std::pair<std::string, std::string>;
 
 
@@ -62,29 +74,17 @@ auto print_every10(
 ) -> void;
 
 
-template<typename T1, typename T2, class Params, class... Ts>
-auto optimize(
-    std::function<T1(const std::valarray<T1> &)> &&fitness, 
-    const space<T1, T2> &space, 
-    const Params &params, 
-    const Ts... args
-) -> std::promise<result<T1, Params>>;
 
+auto main(int argc, char* argv[]) -> int {
 
-template<typename T, class Params>
-auto handle_result(result<T, Params> &&result);
-
-
-auto main(int argc, char *argv[]) -> int {
-
-    std::unordered_map<int, std::pair<fitness_function, bounds_type>> availableTargets {
+    std::unordered_map<int, std::pair<fitness_function, bounds_type>> availableTargets{
         { 1, f1<target_type>() },
         { 2, f2<target_type>() },
         { 3, f3<target_type>() },
         { 4, f4<target_type>() }
     };
-    
-    std::unordered_map<std::string, variants_of_parameters> defaultParams {
+
+    std::unordered_map<std::string, variants_of_parameters> defaultParams{
         { "dummy", dummy::parameters {
             .maxPopulation = 1000000
         } },
@@ -99,7 +99,7 @@ auto main(int argc, char *argv[]) -> int {
             .targetClosestAvg = 2
         } }
     };
-    
+
     std::optional<std::string> oMethod;
     std::optional<int> oTarget;
     std::optional<double> oPrecision;
@@ -113,7 +113,7 @@ auto main(int argc, char *argv[]) -> int {
             ("method", po::value<std::string>(), "optimization method")
             ("precision,p", po::value<double>(), "precision, mesh size")
             ("limit,l", po::value<std::uint64_t>(), "generation limit, max generations count")
-        ;
+            ;
         po::positional_options_description positional;
         positional.add("method", 1);
 
@@ -159,7 +159,7 @@ auto main(int argc, char *argv[]) -> int {
     auto selectedTargetEntry = availableTargets.find(target);
     if (availableTargets.cend() == selectedTargetEntry) {
         std::cerr << "\nInvalid target: " << target << "\nAvailable targets: ";
-        for (const auto &[key, value]: availableTargets) {
+        for (const auto& [key, value] : availableTargets) {
             std::cerr << key << ' ';
         }
         std::cerr << std::endl;
@@ -171,13 +171,15 @@ auto main(int argc, char *argv[]) -> int {
     auto defaultParamsEntry = defaultParams.find(method);
     if (defaultParams.cend() == defaultParamsEntry) {
         std::cerr << "\nUnsupported method: " << method << "\nSupported methods: ";
-        for (const auto &[key, value]: defaultParams) {
+        for (const auto& [key, value] : defaultParams) {
             std::cerr << key << ' ';
         }
         std::cerr << std::endl;
         return 1;
     }
+
     auto vParams = defaultParamsEntry->second;
+
 
     Json::Value configuration;
     Json::CharReaderBuilder builder;
@@ -186,27 +188,28 @@ auto main(int argc, char *argv[]) -> int {
     bool success = Json::parseFromStream(builder, std::cin, &configuration, &errs);
     if (success) {
         Json::Value methodConfig = configuration[method];
-        std::visit([&methodConfig](auto &params) {
-            common::maybe_set<std::decay_t<decltype(params)>> {
+        std::visit([&methodConfig](auto& params) {
+            maybe_set<std::decay_t<decltype(params)>> {
                 params
             }.from_json(methodConfig);
-        }, vParams);
+            }, vParams);
     }
     else {
-        std::visit([](auto &params) {
+        std::visit([](auto& params) {
             std::cin >> params;
-        }, vParams);
+            }, vParams);
     }
 
     auto generationLimit = oGenerationLimit.value_or(1000);
-    auto vOptimizer = std::visit(overloaded {
-        [](const dummy::parameters &params) {
+
+    auto vOptimizer = map_variant(vParams, overloaded{
+        [generationLimit](const dummy::parameters& params) {
             return params.make_optimizer(print_population_size);
         },
-        [generationLimit](const cmn::parameters &params) {
+        [generationLimit](const cmn::parameters& params) {
             return params.make_optimizer(generationLimit, print_population_size);
         }
-    }, vParams);
+    });
 
     auto precision = oPrecision.value_or(1.0) / std::numbers::sqrt2 * 2.0;
     auto resolution = std::vector<std::uint32_t>(bounds.size());
@@ -214,18 +217,31 @@ auto main(int argc, char *argv[]) -> int {
         auto count = std::abs(bounds[k].first - bounds[k].second) / precision;
         resolution[k] = static_cast<std::uint32_t>(std::ceil(count)) + 1;
     }
-
     auto space = make_space(bounds, resolution);
 
-    std::random_device rd;
-    std::mt19937_64 gen { rd() };
-    auto vResult = std::visit([&gen, &space, fitness](const auto &optimizer) { 
-        return optimizer.optimize(gen, space, fitness);
-    }, vOptimizer);
+    std::thread executor;
 
-    std::visit([](const auto &result) {
-        handle_result(result);
-    }, vResult);
+    auto vPromisedResult = map_variant(vOptimizer, [&executor, &space, &fitness](auto& optimizer) {
+        std::random_device rd;
+        std::mt19937_64 gen{ rd() };
+
+        using result_type = std::decay_t<decltype(optimizer.optimize(gen, space, fitness))>;
+        std::promise<result_type> pResult;
+        executor = std::thread{ 
+            [&gen, &space, &fitness, &optimizer, &pResult]() {
+                auto result = optimizer.optimize(gen, space, fitness);
+                pResult.set_value_at_thread_exit(result);
+            } 
+        };
+
+        return pResult;
+    });
+
+    std::visit([](auto&& pResult) {
+        auto future = pResult.get_future();
+        future.wait();
+        std::cout << future.get();
+    }, vPromisedResult);
     
     return 0;
 }
@@ -277,58 +293,3 @@ auto print_every10(
 }
 
 
-template<typename T1, typename T2, class Params, class... Ts>
-auto optimize(
-    std::function<T1(const std::valarray<T1> &)> &&fitness,
-    const space<T1, T2> &space, 
-    const Params &params, 
-    const Ts... args
-) -> std::thread {
-    auto optimizer = params.make_optimizer(args...);
-    auto thread = std::thread { 
-        [&optimizer](const auto &space, auto &&fitness) {
-            std::random_device rd;
-            std::mt19937_64 gen { rd() };
-            auto result = optimizer.optimize(gen, space, fitness);
-            futureResult.set_value_at_thread_exit(result);
-        }, space, fitness
-    };
-
-    return thread;
-}
-
-
-template<typename T>
-auto handle_result(result<T, dummy::parameters> &&result) {
-    std::cout << "\nDummy" << std::endl;
-}
-
-template<typename T>
-auto handle_result(result<T, cmn::parameters> &&result) {
-    switch (result.status) {
-    case status::IN_PROGRESS:
-        std::cout << "\nOptimization is ongoing: generation " << result.generation;
-        break;
-    case status::CONVERGED:
-        std::cout << "\nOptimization completed on generation " << result.generation
-                << " by converging";
-        break;
-    case status::REACHED_GENERATION_LIMIT:
-        std::cout << "\nOptimization completed on generation " << result.generation
-                << " by reaching generation limit";
-        break;
-    case status::REACHED_POPULATION_LIMIT:
-        std::cout << "\nOptimization completed on generation " << result.generation
-                << " by reaching population limit";
-        break;
-    default:
-        std::cout << "Optimization finished on generation " << result.generation 
-                << " with unexpected result: " << static_cast<int>(result.status);
-        break;
-    }
-    std::cout << "\nFinal population size: " << result.population.size();
-    for (std::size_t k = 0; k < result.population.size(); ++k) {
-        std::cout << "\n" << result.population[k] << " -> " << result.values[k];
-    }
-    std::cout << std::endl;
-}

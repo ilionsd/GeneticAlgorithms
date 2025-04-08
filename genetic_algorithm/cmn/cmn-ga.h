@@ -10,6 +10,7 @@
 #include <iostream>
 #include <iterator>
 #include <functional>
+#include <numeric>
 #include <optional>
 #include <random>
 #include <tuple>
@@ -143,6 +144,40 @@ struct result<T, cmn::parameters> {
     std::vector<std::valarray<T>> population;
     std::vector<T> values;
 };
+
+template<typename CharT, typename T>
+inline std::basic_ostream<CharT>& operator<< (std::basic_ostream<CharT>& os, const result<T, cmn::parameters>& res) {
+    switch (res.status) {
+    case status::IN_PROGRESS:
+        os << "\nOptimization is ongoing: generation " << res.generation;
+        break;
+    case status::CONVERGED:
+        os << "\nOptimization completed on generation " << res.generation
+            << " by converging";
+        break;
+    case status::REACHED_GENERATION_LIMIT:
+        os << "\nOptimization completed on generation " << res.generation
+            << " by reaching generation limit";
+        break;
+    case status::REACHED_POPULATION_LIMIT:
+        os << "\nOptimization completed on generation " << res.generation
+            << " by reaching population limit";
+        break;
+    default:
+        os << "Optimization finished on generation " << res.generation
+            << " with unexpected result: " << static_cast<int>(res.status);
+        break;
+    }
+    os << "\nFinal population size: " << res.population.size();
+    for (std::size_t k = 0; k < res.population.size(); ++k) {
+        os << '\n' << '[' << ' ';
+        for (const auto& val : res.population[k]) {
+            os << val << ' ';
+        }
+        os << " -> " << res.values[k];
+    }
+    return os << std::endl;
+}
 
 
 template<class OnNextGeneration>
@@ -499,7 +534,7 @@ public:
 
         populationReal.resize(populationSize);
         fitnessValues.resize(populationSize);
-        return result<T1, cmn::parameters> { status, generation, populationSize, populationReal, fitnessValues };
+        return { status, generation, populationSize, populationReal, fitnessValues };
     }
 
     template<typename T>
@@ -588,6 +623,6 @@ struct maybe_set<cmn::parameters> {
     }
 };
 
-}   //-- namespace genetic_algorithm::common --
+}   //-- namespace genetic_algorithm --
 
 #endif // GENETIC_ALGORITHM__CMN_GA_H_

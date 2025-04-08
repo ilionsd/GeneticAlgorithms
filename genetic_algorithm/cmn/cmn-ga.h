@@ -47,10 +47,10 @@ struct parameters {
         );
     }
 
-    std::size_t initialPopulation;
-    std::size_t maxPopulation;
-	std::size_t crossoversPerGeneration;
-	std::size_t mutationsPerGeneration;
+    std::uint64_t initialPopulation;
+    std::uint64_t maxPopulation;
+	std::uint64_t crossoversPerGeneration;
+	std::uint64_t mutationsPerGeneration;
 	int nMin;
 	int nCrowd;
 	int nTry;
@@ -125,10 +125,10 @@ class model<cmn::parameters> {
         return *this;
     }
 
-    entry<std::size_t> initialPopulation;
-    entry<std::size_t> maxPopulation;
-	entry<std::size_t> crossoversPerGeneration;
-	entry<std::size_t> mutationsPerGeneration;
+    entry<std::uint64_t> initialPopulation;
+    entry<std::uint64_t> maxPopulation;
+	entry<std::uint64_t> crossoversPerGeneration;
+	entry<std::uint64_t> mutationsPerGeneration;
 	entry<int> nMin;
 	entry<int> nCrowd;
 	entry<int> nTry;
@@ -140,7 +140,7 @@ template <typename T>
 struct result<T, cmn::parameters> {
     status status;
     std::uint64_t generation;
-    std::size_t size;
+    std::uint64_t size;
     std::vector<std::valarray<T>> population;
     std::vector<T> values;
 };
@@ -595,16 +595,16 @@ struct maybe_set<cmn::parameters> {
     cmn::parameters &params;
 
     maybe_set<cmn::parameters> &from_json(const Json::Value &json) {
-        maybe_set<std::size_t> { 
+        maybe_set<std::uint64_t> { 
             params.initialPopulation 
         }.from_json(json["initial-population"]);
-        maybe_set<std::size_t> { 
+        maybe_set<std::uint64_t> { 
             params.maxPopulation 
         }.from_json(json["max-population"]);
-        maybe_set<std::size_t> { 
+        maybe_set<std::uint64_t> { 
             params.crossoversPerGeneration 
         }.from_json(json["crossovers-per-generation"]);
-        maybe_set<std::size_t> { 
+        maybe_set<std::uint64_t> { 
             params.mutationsPerGeneration 
         }.from_json(json["mutations-per-generation"]);
         maybe_set<int> { 

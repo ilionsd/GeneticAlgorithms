@@ -25,6 +25,18 @@ struct maybe_set<int> {
 };
 
 template<>
+struct maybe_set<std::uint32_t> {
+    std::uint32_t& val;
+
+    maybe_set<std::uint32_t> &from_json(const Json::Value &json) {
+        if (json.isUInt()) {
+            val = json.asUInt();
+        }
+        return *this;
+    }
+};
+
+template<>
 struct maybe_set<std::uint64_t> {
     std::uint64_t& val;
 

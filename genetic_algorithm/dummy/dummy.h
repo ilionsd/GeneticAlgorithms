@@ -23,7 +23,7 @@ struct parameters {
         return optimizer<OnNextGeneration, parameters> { maxPopulation };
     }
 
-    std::size_t maxPopulation;
+    std::uint64_t maxPopulation;
 };
 
 template<typename CharT>
@@ -44,7 +44,7 @@ std::basic_ostream<CharT>& operator<<(std::basic_ostream<CharT>& os, parameters 
 template<typename T>
 struct result<T, dummy::parameters> {
     status status;
-    std::size_t size;
+    std::uint64_t size;
     std::vector<std::valarray<T>> population;
     std::vector<T> values;
 };
@@ -90,7 +90,7 @@ struct maybe_set<dummy::parameters> {
     dummy::parameters& params;
 
     maybe_set<dummy::parameters>& from_json(const Json::Value& json) {
-        maybe_set<std::size_t> {
+        maybe_set<std::uint64_t> {
             params.maxPopulation
         }.from_json(json["max-population"]);
         return *this;

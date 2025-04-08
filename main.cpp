@@ -110,6 +110,7 @@ auto main(int argc, char* argv[]) -> int {
         po::options_description desc("Allowed options");
         desc.add_options()
             ("help,h", "produce help message")
+            ("function,f", po::value<int>(), "target specified")
             ("method", po::value<std::string>(), "optimization method")
             ("precision,p", po::value<double>(), "precision, mesh size")
             ("limit,l", po::value<std::uint64_t>(), "generation limit, max generations count")
@@ -131,23 +132,25 @@ auto main(int argc, char* argv[]) -> int {
             return 0;
         }
         if (vm.count("method")) {
-            auto str = vm["method"].as<std::string>();
-            oMethod = str;
+            oMethod = vm["method"].as<std::string>();
         }
         if (vm.count("function")) {
-            auto str = vm["function"].as<std::string>();
-            oTarget = optional_parse<int>(str);
-            if (!oTarget) {
-                throw std::logic_error("\nInvalid target: " + str);
-            }
+            oTarget = vm["function"].as<int>();
         }
         if (vm.count("precision")) {
-            auto str = vm["precision"].as<std::string>();
-            oPrecision = optional_parse<double>(str);
+            oPrecision = vm["precision"].as<double>();
         }
         if (vm.count("limit")) {
-            auto str = vm["limit"].as<std::string>();
-            oGenerationLimit = optional_parse<std::uint64_t>(str);
+            oGenerationLimit = vm["limit"].as<std::uint64_t>();
+        }
+
+        if (!oTarget) {
+            std::cerr << "\nNo tagret specified! \n\n" << desc << std::endl;
+            return 0;
+        }
+        if (!oMethod) {
+            std::cerr << "\nNo method specified! \n\n" << desc << std::endl;
+            return 0;
         }
     }
     catch (std::exception& e) {

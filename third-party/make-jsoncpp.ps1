@@ -22,7 +22,7 @@ Expand-Archive "$Local" -DestinationPath "$SourcesDir"
 
 
 Get-ChildItem "$SourcesDir\jsoncpp-$JsonCppVersion" | ForEach-Object {
-    Move-Item -Path "$SourcesDir\jsoncpp-$JsonCppVersion\$_" -Destination "$SourcesDir" -Force
+    Move-Item -Path "$_" -Destination "$SourcesDir" -Force
 }
 Remove-Item -LiteralPath "$SourcesDir\jsoncpp-$JsonCppVersion" -Force
 
@@ -38,8 +38,27 @@ if (Test-Path "$BuildDir" -PathType Container) {
 }
 New-Item -ItemType "directory" -Path "$BuildDir"
 
+$Cmake = "C:\Program Files\Microsoft Visual Studio\2022\Community\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin\cmake.exe"
+$MSBuild = "C:\Program Files\Microsoft Visual Studio\2022\Community\MSBuild\Current\Bin\MSBuild.exe"
+
 Push-Location "$BuildDir"
-& "C:\Program Files\Microsoft Visual Studio\2022\Community\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin\cmake.exe" @("-G", "Visual Studio 17 2022", "-DCMAKE_INSTALL_PREFIX='$InstallPrefix'", "-DCMAKE_VS_INCLUDE_INSTALL_TO_DEFAULT_BUILD=ON", "../")
+& "$Cmake" @(
+    "-G", "Visual Studio 17 2022", 
+    "-DCMAKE_INSTALL_PREFIX='$InstallPrefix'", 
+    "-DARCHIVE_INSTALL_DIR='$InstallPrefix'",
+    "-DCMAKE_VS_INCLUDE_INSTALL_TO_DEFAULT_BUILD=ON", 
+    "-DBUILD_STATIC_LIBS=ON",
+    "-DBUILD_SHARED_LIBS=OFF",
+    "-DCMAKE_BUILD_TYPE=debug", 
+    "../"
+)
+
+& "$MSBuild" @(
+    "/target:Clean"
+    "/target:Build"
+    "/property:Configuration=Debug"
+    ".\jsoncpp.sln"
+)
 
 Pop-Location
 

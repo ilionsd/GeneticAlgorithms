@@ -164,7 +164,7 @@ inline std::basic_ostream<CharT>& operator<< (std::basic_ostream<CharT>& os, con
             << " by reaching population limit";
         break;
     default:
-        os << "Optimization finished on generation " << res.generation
+        os << "\nOptimization finished on generation " << res.generation
             << " with unexpected result: " << static_cast<int>(res.status);
         break;
     }
@@ -174,7 +174,7 @@ inline std::basic_ostream<CharT>& operator<< (std::basic_ostream<CharT>& os, con
         for (const auto& val : res.population[k]) {
             os << val << ' ';
         }
-        os << " -> " << res.values[k];
+        os << "] -> " << res.values[k];
     }
     return os << std::endl;
 }
@@ -432,7 +432,12 @@ public:
                 auto end = detail::advance(proximityWeight.cbegin(), populationSize);
                 std::transform(begin, end, fitnessWeighted.cbegin(), fitnessWeighted.begin(), [](const auto p, const auto pf) {
                     auto wf = pf / p;
-                    return std::isnan(wf) ? static_cast<T1>(1.0) : wf;
+                    if (std::isnan(wf) || wf > 1.0) {
+                        return static_cast<T1>(1.0);
+                    }
+                    else {
+                        return wf;
+                    }
                 });
             }
 
@@ -482,14 +487,13 @@ public:
                 auto begin = mask.begin();
                 auto end = detail::advance(mask.begin(), mCrossoversPerGeneration);
                 std::fill(begin, end, false);
-                // Crossover
+                //-- Crossover --
                 std::size_t remainingTries = mTry;
                 std::size_t k = 0;
-                while (remainingTries > 0 && increaseSize < mCrossoversPerGeneration) {
-                    auto pair = k++ % mCrossoversPerGeneration;
-                    if (!mask[pair]) {
+                while (remainingTries > 0 && increaseSize < mCrossoversPerGeneration && k < mCrossoversPerGeneration) {
+                    if (!mask[k]) {
                         --remainingTries;
-                        auto [p1, p2] = crossover[pair];
+                        auto [p1, p2] = crossover[k];
                         auto offspringMesh = offspring_by_crossover(generator, populationMesh[p1], populationMesh[p2]);
                         auto offspringReal = space.to_real(offspringMesh);
                         std::size_t closestIndex = 0;
@@ -502,22 +506,23 @@ public:
                         }
                         if (minDistance > r_min(fitnessWeighted[closestIndex], generation)) {
                             std::tie(increaseMesh[increaseSize], increaseReal[increaseSize]) = std::move(std::tie(offspringMesh, offspringReal));
-                            mask[pair] = true;
+                            mask[k] = true;
                             ++increaseSize;
                         }
                     }
+                    ++k;
                 }
                 //-- Mutation --
                 auto d = std::uniform_int_distribution<std::size_t>(0, populationSize);
                 while (remainingTries > 0 && increaseSize < mCrossoversPerGeneration + mMutationsPerGeneration) {
                     --remainingTries;
                     auto k = d(generator);
-                    auto offspringMesh = offspring_by_mutation(generator, populationMesh[k]);
+                    auto offspringMesh = offspring_by_mutation(generator, populationMesh[k], space.sizes());
                     if (space.contains(offspringMesh)) {
                         auto offspringReal = space.to_real(offspringMesh);
                         std::size_t closestIndex = 0;
                         auto minDistance = std::numeric_limits<T1>::max();
-                        for (std::size_t i = 1; i < populationSize; ++i) {
+                        for (std::size_t i = 0; i < populationSize; ++i) {
                             auto distance = euclidean_distance(offspringReal, populationReal[i]);
                             if (minDistance > distance) {
                                 std::tie(minDistance, closestIndex) = std::tie(distance, i);
@@ -561,11 +566,11 @@ public:
     }
 
     template<class Gen, typename T>
-    auto offspring_by_mutation(Gen& generator, const std::valarray<T>& p1) const -> std::valarray<T> {
+    auto offspring_by_mutation(Gen& generator, const std::valarray<T>& p1, const std::valarray<T>& sizes) const -> std::valarray<T> {
         auto dimensions = p1.size();
-        auto stddev = 0.33 * dimensions;
         auto offspring = std::valarray<T>(dimensions);
         for (std::size_t dim = 0; dim < dimensions; ++dim) {
+            auto stddev = 0.33 * sizes[dim];
             auto d = std::normal_distribution<double>(p1[dim], stddev);
             offspring[dim] = static_cast<T>(std::round(d(generator)));
         }
@@ -585,7 +590,7 @@ private:
 
     const OnNextGeneration mOnNextGeneration;
     
-    const int mFailedIncreaseCounterDefault = 5;
+    const int mFailedIncreaseCounterDefault = 20;
 };
 
 

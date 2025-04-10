@@ -1,4 +1,6 @@
 #include <array>
+#include <chrono>
+#include <fstream>
 #include <future>
 #include <iostream>
 #include <numbers>
@@ -184,6 +186,11 @@ auto main(int argc, char* argv[]) -> int {
     auto vParams = defaultParamsEntry->second;
 
 
+
+    if ((std::cin >> std::ws).eof()) {
+        std::cerr << "\nNo configuration provided!";
+        return 0;
+    }
     Json::Value configuration;
     Json::CharReaderBuilder builder;
     //builder["collectComments"] = true;
@@ -223,28 +230,28 @@ auto main(int argc, char* argv[]) -> int {
     auto space = make_space(bounds, resolution);
 
     std::thread executor;
-
-    auto vPromisedResult = map_variant(vOptimizer, [&executor, &space, &fitness](auto& optimizer) {
-        std::random_device rd;
-        std::mt19937_64 gen{ rd() };
-
+    std::random_device rd;
+    std::mt19937_64 gen{ rd() };
+    auto vFutureResult = map_variant(vOptimizer, [&executor, &gen, &space, &fitness](auto& optimizer) {
+        
         using result_type = std::decay_t<decltype(optimizer.optimize(gen, space, fitness))>;
         std::promise<result_type> pResult;
-        executor = std::thread{ 
-            [&gen, &space, &fitness, &optimizer, &pResult]() {
+        auto future = pResult.get_future();
+        executor = std::thread { 
+            [&gen, &space, &fitness, &optimizer](auto &&pResult) {
                 auto result = optimizer.optimize(gen, space, fitness);
-                pResult.set_value_at_thread_exit(result);
-            } 
+                pResult.set_value(result);
+            }, std::move(pResult)
         };
-
-        return pResult;
+        return future;
     });
 
-    std::visit([](auto&& pResult) {
-        auto future = pResult.get_future();
-        future.wait();
-        std::cout << future.get();
-    }, vPromisedResult);
+    executor.join();
+    std::visit([](auto&& future) {
+        auto os = std::ofstream(std::string("output ") + std::format("{:%Y-%m-%d %H-%M}", std::chrono::file_clock::now()) + ".txt", std::ios::out);
+        os << future.get() << std::endl;
+        os.flush();
+    }, vFutureResult);
     
     return 0;
 }

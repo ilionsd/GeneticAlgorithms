@@ -132,6 +132,10 @@ public:
     
     const std::size_t dimensions;
 
+    inline const auto& sizes() const {
+        return mSize;
+    }
+
 private:
     std::valarray<real_type> mLeft;
     std::valarray<real_type> mStep;

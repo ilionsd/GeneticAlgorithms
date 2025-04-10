@@ -1,7 +1,6 @@
 cmake_minimum_required(VERSION 3.12)
 cmake_policy(SET CMP0074 NEW)
 
-SET(CMAKE_CXX_STANDARD_LIBRARIES_INIT "")
 project(GeneticAlgorithms)
 
 set(CMAKE_CXX_STANDARD 23)
@@ -21,7 +20,7 @@ if(${CMAKE_SYSTEM_NAME} STREQUAL "Windows")
         PROPERTIES IMPORTED_LOCATION
 
         # Provides the path to the library you want to import.
-        ${CMAKE_SOURCE_DIR}/third-party/jsoncpp/lib/jsoncpp_static.lib)
+        ${CMAKE_SOURCE_DIR}/third-party/jsoncpp/lib/jsoncpp.lib)
 else()
     set_target_properties(
         # Specifies the target library.
@@ -42,18 +41,33 @@ set( CMAKE_SHARED_LINKER_FLAGS ${CMAKE_SHARED_LINKER_FLAGS}
         "/NODEFAULTLIBS:MSVCPRTD" )
 
 file(GLOB SOURCES
-    genetic_algorithm/dummy/*h
-    genetic_algorithm/cmn/*.h
-    genetic_algorithm/*.h
-    *.h
-    *.cpp
+        genetic_algorithm/dummy/*h
+        genetic_algorithm/cmn/*.h
+        genetic_algorithm/*.h
+        *.h
+        *.cpp
 )
 
 add_executable(GeneticAlgorithms ${SOURCES})
 
 target_link_libraries(GeneticAlgorithms ${Boost_LIBRARIES})
 
-target_include_directories(GeneticAlgorithms PUBLIC ${CMAKE_SOURCE_DIR}/third-party/jsoncpp/include)
+target_include_directories(GeneticAlgorithms PUBLIC 
+        ${CMAKE_SOURCE_DIR}/third-party/jsoncpp/include)
 
 target_link_libraries(GeneticAlgorithms 
-    jsoncpp)
+        jsoncpp
+)
+
+set_target_properties(GeneticAlgorithms PROPERTIES LINK_FLAGS 
+        "/NODEFAULTLIB:user32.lib
+        /NODEFAULTLIB:kernel32.lib
+        /NODEFAULTLIB:gdi32.lib
+        /NODEFAULTLIB:winspool.lib
+        /NODEFAULTLIB:shell32.lib
+        /NODEFAULTLIB:ole32.lib
+        /NODEFAULTLIB:oleaut32.lib
+        /NODEFAULTLIB:uuid.lib
+        /NODEFAULTLIB:comdlg32.lib
+        /NODEFAULTLIB:advapi32.lib"
+)
